@@ -117,7 +117,7 @@ public:
       optimizations.push_back(std::make_shared<std::remove_const_t<std::remove_reference_t<Type> > >(std::forward<Type>(opt)));
   }
 
-private:
+protected:
   //-----------------------------------------------------------------------
   // Simulation types
   //-----------------------------------------------------------------------
@@ -321,7 +321,8 @@ OutputData QasmController::run_circuit(const Circuit &circ,
   switch (simulation_method(circ)) {
     case Method::statevector:
       // Statevector simulation
-      return run_circuit_helper<Statevector::State<>>(circ,
+      return run_circuit_helper<Statevector::State<>>(
+                                                      circ,
                                                       shots,
                                                       rng_seed,
                                                       initial_statevector_); // allow custom initial state
