@@ -17,12 +17,12 @@
 
 #include <unordered_map>
 
-#include "transpile/circuitopt.hpp"
+#include "transpile/transpilation.hpp"
 
 namespace AER {
 namespace Transpile {
 
-class TruncateQubits : public CircuitOptimization {
+class TruncateQubits : public CircuitTranspilation {
 public:
 
   using mapping_t = std::unordered_map<uint_t, uint_t>;
@@ -30,10 +30,9 @@ public:
   void set_config(const json_t &config) override;
 
   // Truncate unused qubits
-  void optimize_circuit(Circuit& circ,
-                        Noise::NoiseModel& noise,
-                        const Operations::OpSet &opset,
-                        OutputData &data) const override;
+  void transpile_circuit(Circuit& circ,
+                         Noise::NoiseModel& noise,
+                         OutputData &data) const override;
 
 private:
   // check this optimization can be applied
@@ -64,7 +63,7 @@ private:
 
 void TruncateQubits::set_config(const json_t &config) {
 
-  CircuitOptimization::set_config(config);
+  CircuitTranspilation::set_config(config);
 
   if (JSON::check_key("truncate_verbose", config)) {
     JSON::get_value(verbose_, "truncate_verbose", config);
@@ -77,10 +76,9 @@ void TruncateQubits::set_config(const json_t &config) {
   }
 }
 
-void TruncateQubits::optimize_circuit(Circuit& circ,
-                                      Noise::NoiseModel& noise,
-                                      const Operations::OpSet &allowed_opset,
-                                      OutputData &data) const {
+void TruncateQubits::transpile_circuit(Circuit& circ,
+                                       Noise::NoiseModel& noise,
+                                       OutputData &data) const {
   
   // Check if circuit operations allow remapping
   // Remapped circuits must return the same output data as the

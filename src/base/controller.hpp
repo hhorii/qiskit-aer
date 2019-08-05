@@ -42,7 +42,7 @@
 #include "framework/rng.hpp"
 #include "framework/creg.hpp"
 #include "noise/noise_model.hpp"
-#include "transpile/circuitopt.hpp"
+#include "transpile/transpilation.hpp"
 #include "transpile/truncate_qubits.hpp"
 
 
@@ -126,9 +126,16 @@ public:
 
   // Add circuit optimization
   template <typename Type>
-  inline auto add_circuit_optimization(Type&& opt)-> typename std::enable_if_t<std::is_base_of<Transpile::CircuitOptimization, std::remove_const_t<std::remove_reference_t<Type>>>::value >
+  inline auto add_circuit_transpilation(Type&& opt)-> typename std::enable_if_t<std::is_base_of<Transpile::CircuitTranspilation, std::remove_const_t<std::remove_reference_t<Type>>>::value >
   {
-      optimizations_.push_back(std::make_shared<std::remove_const_t<std::remove_reference_t<Type>>>(std::forward<Type>(opt)));
+      circuit_transpilations_.push_back(std::make_shared<std::remove_const_t<std::remove_reference_t<Type>>>(std::forward<Type>(opt)));
+  }
+
+  // Add circuit optimization
+  template <typename Type>
+  inline auto add_shot_transpilation(Type&& opt)-> typename std::enable_if_t<std::is_base_of<Transpile::ShotTranspilation, std::remove_const_t<std::remove_reference_t<Type>>>::value >
+  {
+      shot_transpilations_.push_back(std::make_shared<std::remove_const_t<std::remove_reference_t<Type>>>(std::forward<Type>(opt)));
   }
 
 protected:
@@ -176,15 +183,19 @@ protected:
                                     bool throw_except = false) const;
 
   //-------------------------------------------------------------------------
-  // Circuit optimization
+  // Transpilation
   //-------------------------------------------------------------------------
 
   // Generate an equivalent circuit with input_circ as output_circ.
+  void transpile_circuit(Circuit &circ,
+                         Noise::NoiseModel& noise,
+                         OutputData &data) const;
+
+  // Generate an equivalent circuit with input_circ as output_circ.
   template <class state_t>
-  void optimize_circuit(Circuit &circ,
-                        Noise::NoiseModel& noise,
-                        state_t& state,
-                        OutputData &data) const;
+  void transpile_shot(std::vector<Operations::Op>& ops,
+                      state_t& state,
+                      OutputData &data) const;
 
   //-----------------------------------------------------------------------
   // Config
@@ -194,7 +205,10 @@ protected:
   using myclock_t = std::chrono::high_resolution_clock;
 
   // Circuit optimization
-  std::vector<std::shared_ptr<Transpile::CircuitOptimization>> optimizations_;
+  std::vector<std::shared_ptr<Transpile::CircuitTranspilation>> circuit_transpilations_;
+
+  // Shot optimization
+  std::vector<std::shared_ptr<Transpile::ShotTranspilation>> shot_transpilations_;
 
   // Validation threshold for validating states and operators
   double validation_threshold_ = 1e-8;
@@ -266,7 +280,12 @@ void Controller::set_config(const json_t &config) {
     JSON::get_value(max_memory_mb_, "max_memory_mb", config);
   }
 
-  for (std::shared_ptr<Transpile::CircuitOptimization> opt: optimizations_)
+  // for circuit transpilation
+  for (std::shared_ptr<Transpile::CircuitTranspilation> opt: circuit_transpilations_)
+    opt->set_config(config);
+
+  // for shot transpilation
+  for (std::shared_ptr<Transpile::ShotTranspilation> opt: shot_transpilations_)
     opt->set_config(config);
 
   // for debugging
@@ -451,21 +470,28 @@ bool Controller::validate_memory_requirements(state_t &state,
 }
 
 //-------------------------------------------------------------------------
-// Circuit optimization
+// Circuit transpilation
 //-------------------------------------------------------------------------
+void Controller::transpile_circuit(Circuit &circ,
+                                   Noise::NoiseModel& noise,
+                                   OutputData &data) const {
+  for (std::shared_ptr<Transpile::CircuitTranspilation> opt: circuit_transpilations_) {
+    opt->transpile_circuit(circ, noise, data);
+  }
+}
+
 template <class state_t>
-void Controller::optimize_circuit(Circuit &circ,
-                                  Noise::NoiseModel& noise,
-                                  state_t& state,
-                                  OutputData &data) const {
+void Controller::transpile_shot(std::vector<Operations::Op>& ops,
+                                state_t& state,
+                                OutputData &data) const {
 
   Operations::OpSet allowed_opset;
   allowed_opset.optypes = state.allowed_ops();
   allowed_opset.gates = state.allowed_gates();
   allowed_opset.snapshots = state.allowed_snapshots();
 
-  for (std::shared_ptr<Transpile::CircuitOptimization> opt: optimizations_) {
-    opt->optimize_circuit(circ, noise, allowed_opset, data);
+  for (std::shared_ptr<Transpile::ShotTranspilation> opt: shot_transpilations_) {
+    opt->transpile_shot(ops, allowed_opset, data);
   }
 }
 
@@ -604,9 +630,7 @@ json_t Controller::execute_circuit(Circuit &circ,
   // for individual circuit failures.
   try {
     // Truncate unused qubits from circuit and noise model
-    Transpile::TruncateQubits truncate_pass;
-    truncate_pass.set_config(config);
-    truncate_pass.optimize_circuit(circ, noise, Operations::OpSet(), data);
+    transpile_circuit(circ, noise, data);
 
     // set parallelization for this circuit
     if (!explicit_parallelization_ && parallel_experiments_ == 1) {

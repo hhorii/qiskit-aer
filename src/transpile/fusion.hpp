@@ -15,7 +15,7 @@
 #ifndef _aer_transpile_fusion_hpp_
 #define _aer_transpile_fusion_hpp_
 
-#include "transpile/circuitopt.hpp"
+#include "transpile/transpilation.hpp"
 
 namespace AER {
 namespace Transpile {
@@ -27,10 +27,10 @@ using oplist_t = std::vector<op_t>;
 using opset_t = Operations::OpSet;
 using reg_t = std::vector<uint_t>;
 
-class Fusion : public CircuitOptimization {
+class Fusion : public ShotTranspilation {
 public:
   // constructor
-  Fusion(uint_t max_qubit = 5, uint_t threshold = 16, double cost_factor = 1.8);
+  Fusion(uint_t max_qubit = 5, double cost_factor = 1.8);
 
   /*
    * Fusion optimization uses following configuration options
@@ -42,10 +42,9 @@ public:
   */
   void set_config(const json_t &config) override;
 
-  void optimize_circuit(Circuit& circ,
-                        Noise::NoiseModel& noise,
-                        const opset_t &opset,
-                        OutputData &data) const override;
+  void transpile_shot(std::vector<op_t>& ops,
+                      const opset_t &opset,
+                      OutputData &data) const override;
 
 private:
   bool can_ignore(const op_t& op) const;
@@ -84,14 +83,13 @@ private:
   cmatrix_t matrix(const op_t& op) const;
 
 #ifdef DEBUG
-  void dump(const Circuit& circuit) const;
+  void dump(const std::vector<op_t>& ops) const;
 #endif
 
   const static std::vector<std::string> supported_gates;
 
 private:
   uint_t max_qubit_;
-  uint_t threshold_;
   double cost_factor_;
   bool verbose_;
   bool active_;
@@ -122,14 +120,13 @@ const std::vector<std::string> Fusion::supported_gates({
   //"ccx"   // Controlled-CX gate (Toffoli): TODO
 });
 
-Fusion::Fusion(uint_t max_qubit, uint_t threshold, double cost_factor):
-    max_qubit_(max_qubit), threshold_(threshold), cost_factor_(cost_factor),
-    verbose_(false), active_(false) {
+Fusion::Fusion(uint_t max_qubit, double cost_factor):
+    max_qubit_(max_qubit), cost_factor_(cost_factor), verbose_(false), active_(false) {
 }
 
 void Fusion::set_config(const json_t &config) {
 
-  CircuitOptimization::set_config(config);
+  Transpilation::set_config(config);
 
   if (JSON::check_key("fusion_verbose", config_))
     JSON::get_value(verbose_, "fusion_verbose", config_);
@@ -149,9 +146,9 @@ void Fusion::set_config(const json_t &config) {
 
 
 #ifdef DEBUG
-void Fusion::dump(const Circuit& circuit) const {
+void Fusion::dump(const std::vector<op_t>& ops) const {
   int idx = 0;
-  for (const op_t& op : circuit.ops) {
+  for (const op_t& op : ops) {
     std::cout << "  " << idx++ << ":\t" << op.name << " " << op.qubits << std::endl;
     for (const cmatrix_t&  mat: op.mats) {
       const uint_t row = mat.GetRows();
@@ -169,52 +166,50 @@ void Fusion::dump(const Circuit& circuit) const {
 }
 #endif
 
-void Fusion::optimize_circuit(Circuit& circ,
-                              Noise::NoiseModel& noise,
-                              const opset_t &allowed_opset,
-                              OutputData &data) const {
+void Fusion::transpile_shot(std::vector<op_t>& ops,
+                            const opset_t &allowed_opset,
+                            OutputData &data) const {
 
-  if (circ.num_qubits < threshold_
-      || !active_)
+  if (!active_)
     return;
 
   bool applied = false;
 
   uint_t fusion_start = 0;
-  for (uint_t op_idx = 0; op_idx < circ.ops.size(); ++op_idx) {
-    if (can_ignore(circ.ops[op_idx]))
+  for (uint_t op_idx = 0; op_idx < ops.size(); ++op_idx) {
+    if (can_ignore(ops[op_idx]))
       continue;
-    if (!can_apply_fusion(circ.ops[op_idx])) {
-      applied |= fusion_start != op_idx && aggregate_operations(circ.ops, fusion_start, op_idx);
+    if (!can_apply_fusion(ops[op_idx])) {
+      applied |= fusion_start != op_idx && aggregate_operations(ops, fusion_start, op_idx);
       fusion_start = op_idx + 1;
     }
   }
 
-  if (fusion_start < circ.ops.size()
-      && aggregate_operations(circ.ops, fusion_start, circ.ops.size()))
+  if (fusion_start < ops.size()
+      && aggregate_operations(ops, fusion_start, ops.size()))
       applied = true;
 
   if (applied) {
 
     size_t idx = 0;
-    for (size_t i = 0; i < circ.ops.size(); ++i) {
-      if (circ.ops[i].name != "nop") {
+    for (size_t i = 0; i < ops.size(); ++i) {
+      if (ops[i].name != "nop") {
         if (i != idx)
-          circ.ops[idx] = circ.ops[i];
+          ops[idx] = ops[i];
         ++idx;
       }
     }
 
-    if (idx != circ.ops.size())
-      circ.ops.erase(circ.ops.begin() + idx, circ.ops.end());
+    if (idx != ops.size())
+      ops.erase(ops.begin() + idx, ops.end());
 
     if (verbose_)
       data.add_additional_data("metadata",
-                               json_t::object({{"fusion_verbose", circ.ops}}));
+                               json_t::object({{"fusion_verbose", ops}}));
   }
 
 #ifdef DEBUG
-  dump(circ.ops);
+  dump(ops);
 #endif
 }
 
