@@ -35,6 +35,8 @@ basic_pybind11_add_module(controller_wrappers bindings.cc)
 target_include_directories(controller_wrappers PRIVATE ${AER_SIMULATOR_CPP_SRC_DIR}
                                                PRIVATE ${AER_SIMULATOR_CPP_EXTERNAL_LIBS})
 target_link_libraries(controller_wrappers ${AER_LIBRARIES})
+set_target_properties(controller_wrappers PROPERTIES LINKER_LANGUAGE CXX CXX_STANDARD 14)
+target_compile_definitions(controller_wrappers PRIVATE ${AER_COMPILER_DEFINITIONS})
 install(TARGETS controller_wrappers LIBRARY DESTINATION qiskit/providers/aer/backends)
 
 # Install redistributable dependencies
