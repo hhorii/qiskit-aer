@@ -11,6 +11,9 @@ if(APPLE OR LINUX)
 endif()
 
 # Controllers
+if(CUDA_FOUND)
+    set_source_files_properties(bindings.cc PROPERTIES CUDA_SOURCE_PROPERTY_FORMAT OBJ)
+endif()
 basic_pybind11_add_module(controller_wrappers bindings.cc)
 target_include_directories(controller_wrappers PRIVATE ${AER_SIMULATOR_CPP_SRC_DIR}
                                                PRIVATE ${AER_SIMULATOR_CPP_EXTERNAL_LIBS})
