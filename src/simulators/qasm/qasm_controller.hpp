@@ -21,9 +21,6 @@
 #include "transpile/delay_measure.hpp"
 #include "simulators/extended_stabilizer/extended_stabilizer_state.hpp"
 #include "simulators/statevector/statevector_state.hpp"
-#ifdef AER_THRUST_SUPPORTED
-#include "simulators/statevector/statevector_gpu_state.hpp"
-#endif
 #include "simulators/stabilizer/stabilizer_state.hpp"
 #include "simulators/matrix_product_state/matrix_product_state.hpp"
 #include "simulators/densitymatrix/densitymatrix_state.hpp"
@@ -417,7 +414,7 @@ ExperimentData QasmController::run_circuit(const Circuit &circ,
 #ifdef AER_THRUST_SUPPORTED
       if (simulation_precision_ == Precision::double_precision) {
         // Double-precision Statevector simulation
-      	return run_circuit_helper<StatevectorThrust::State<QV::QubitVectorThrust<double>>>(
+      	return run_circuit_helper<Statevector::State<QV::QubitVectorThrust<double>>>(
                                                       circ,
                                                       noise,
                                                       config,
@@ -427,7 +424,7 @@ ExperimentData QasmController::run_circuit(const Circuit &circ,
                                                       Method::statevector_gpu);
       } else {
         // Single-precision Statevector simulation
-      	return run_circuit_helper<StatevectorThrust::State<QV::QubitVectorThrust<float>>>(
+      	return run_circuit_helper<Statevector::State<QV::QubitVectorThrust<float>>>(
                                                       circ,
                                                       noise,
                                                       config,
@@ -549,10 +546,10 @@ QasmController::simulation_method(const Circuit &circ,
 #else
       if (validate) {
         if (simulation_precision_ == Precision::single_precision) {
-          StatevectorThrust::State<QV::QubitVectorThrust<float>> state;
+          Statevector::State<QV::QubitVectorThrust<float>> state;
           validate_state(state, circ, noise_model, true);
         } else {
-          StatevectorThrust::State<QV::QubitVectorThrust<>> state;
+          Statevector::State<QV::QubitVectorThrust<>> state;
           validate_state(state, circ, noise_model, true);
         }
       }
