@@ -358,6 +358,18 @@ public:
   double norm_diagonal(const reg_t &qubits, const cvector_t<double> &mat) const;
 
   //-----------------------------------------------------------------------
+  // Expectation Value
+  //-----------------------------------------------------------------------
+
+  // These functions return the expectation value <psi|A|psi> for a matrix A.
+  // If A is hermitian these will return real values, if A is non-Hermitian
+  // they in general will return complex values.
+
+  // Return the expectation value of an N-qubit Pauli matrix.
+  // The Pauli is input as a length N string of I,X,Y,Z characters.
+  double expval_pauli(const reg_t &qubits, const std::string &pauli) const;
+
+  //-----------------------------------------------------------------------
   // JSON configuration settings
   //-----------------------------------------------------------------------
 
@@ -470,15 +482,17 @@ protected:
   //-----------------------------------------------------------------------
   // State reduction with Lambda functions
   //-----------------------------------------------------------------------
-  // Apply a complex reduction lambda function to all entries of the
-  // statevector and return the complex result.
-  // The function signature should be:
+  // Apply a complex reduction lambda function over the specified entries
+  // of the state vector given by start, stop.
   //
   // [&](const int_t k, double &val_re, double &val_im)->void
   //
   // where k is the index of the vector, val_re and val_im are the doubles
   // to store the reduction.
   // Returns std::complex<double>(val_re, val_im)
+  template <typename Lambda>
+  std::complex<double> apply_reduction_lambda(Lambda&& func, size_t start, size_t stop) const;
+
   template <typename Lambda>
   std::complex<double> apply_reduction_lambda(Lambda&& func) const;
 
@@ -1050,22 +1064,27 @@ void QubitVector<data_t, Derived>::apply_lambda(Lambda&& func,
 
 template <typename data_t, typename Derived>
 template<typename Lambda>
-std::complex<double> QubitVector<data_t, Derived>::apply_reduction_lambda(Lambda &&func) const {
+std::complex<double>
+QubitVector<data_t, Derived>::apply_reduction_lambda(Lambda &&func, size_t start, size_t stop) const {
   // Reduction variables
   double val_re = 0.;
   double val_im = 0.;
-  const int_t END = data_size_;
 #pragma omp parallel reduction(+:val_re, val_im) if (num_qubits_ > omp_threshold_ && omp_threads_ > 1)         \
                                                num_threads(omp_threads_)
   {
 #pragma omp for
-    for (int_t k = 0; k < END; k++) {
+    for (int_t k = int_t(start); k < int_t(stop); k++) {
         std::forward<Lambda>(func)(k, val_re, val_im);
       }
   } // end omp parallel
   return std::complex<double>(val_re, val_im);
 }
 
+template <typename data_t, typename Derived>
+template<typename Lambda>
+std::complex<double> QubitVector<data_t, Derived>::apply_reduction_lambda(Lambda &&func) const {
+  return apply_reduction_lambda(std::move(func), size_t(0), data_size_);
+}
 
 template <typename data_t, typename Derived>
 template<typename Lambda, typename list_t>
@@ -2175,6 +2194,98 @@ reg_t QubitVector<data_t, Derived>::sample_measure(const std::vector<double> &rn
     } // end omp parallel
   }
   return samples;
+}
+
+/*******************************************************************************
+ *
+ * EXPECTATION VALUES
+ *
+ ******************************************************************************/
+
+template <typename data_t, typename Derived>
+double QubitVector<data_t, Derived>::expval_pauli(const reg_t &qubits,
+                                         const std::string &pauli) const {
+  // Break string up into Z and X
+  // With Y being both Z and X (plus a phase)
+  const size_t N = qubits.size();
+  size_t num_x = 0;
+  size_t num_y = 0;
+  size_t num_z = 0;
+  uint_t x_indices = 0;
+  uint_t z_indices = 0;
+  for (size_t i = 0; i < N; ++i) {
+    const auto bit = BITS[qubits[i]];
+    switch (pauli[N - 1 - i]) {
+      case 'I':
+        break;
+      case 'X': {
+        x_indices += bit;
+        num_x++;
+        break;
+      }
+      case 'Z': {
+        z_indices += bit;
+        num_z++;
+        break;
+      }
+      case 'Y': {
+        x_indices += bit;
+        z_indices += bit;
+        num_y++;
+        break;
+      }
+    }
+  }
+
+  // Special case for only Z & I Paulis
+  if (num_x + num_y == 0) {
+    // All I Paulis returns the norm of the state
+    if (num_z == 0)
+      return norm();
+    auto lambda = [&](const int_t i, double &val_re, double &val_im)->void {
+      (void)val_im; // unused
+      const auto val = std::real(data_[i] * std::conj(data_[i]));
+      val_re += (__builtin_popcountll(i & z_indices) % 2) ? -val: val;
+    };
+    return std::real(apply_reduction_lambda(lambda));
+  }
+
+  // Special case for only X & I Paulis
+  if (num_z + num_y == 0) {
+    auto lambda = [&](const int_t i, double &val_re, double &val_im)->void {
+      (void)val_im; // unused
+      val_re += std::real(data_[i ^ x_indices] * std::conj(data_[i]));
+    };
+    return std::real(apply_reduction_lambda(lambda));
+  }
+
+  // General case
+  // Compute the overall phase of the operator.
+  // This is (-1j) ** number of Y terms
+  std::complex<data_t> phase(1, 0);
+  switch (num_y % 4) {
+    case 0:
+      // phase = 1
+      break;
+    case 1:
+      // phase = -1j
+      phase = std::complex<data_t>(0, -1);
+      break;
+    case 2:
+      // phase = -1
+      phase = std::complex<data_t>(-1, 0);
+      break;
+    case 3:
+      // phase = 1j
+      phase = std::complex<data_t>(0, 1);
+      break;
+  }
+  auto lambda = [&](const int_t i, double &val_re, double &val_im)->void {
+    (void)val_im; // unused
+    const auto val = std::real(data_[i ^ x_indices] * phase * std::conj(data_[i]));
+    val_re += (__builtin_popcountll(i & z_indices) % 2) ? -val : val;
+  };
+  return std::real(apply_reduction_lambda(lambda));
 }
 
 //------------------------------------------------------------------------------
