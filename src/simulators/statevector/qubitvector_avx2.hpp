@@ -93,6 +93,54 @@ inline std::ostream &operator<<(std::ostream &out, const QV::QubitVectorAvx2<dat
   return out;
 }
 
+#ifdef _QV_HEDDER_ONLY
+
+template <typename data_t>
+QubitVectorAvx2<data_t>::QubitVectorAvx2(size_t num_qubits){
+      Base::num_qubits_ = 0;
+      Base::data_ = nullptr;
+      Base::checkpoint_ = 0;
+      Base::set_num_qubits(num_qubits);
+}
+
+template <typename data_t>
+QubitVectorAvx2<data_t>::QubitVectorAvx2() : QubitVectorAvx2(0) {}
+
+template <typename data_t>
+void QubitVectorAvx2<data_t>::apply_matrix(const uint_t qubit,
+                                          const cvector_t<double>& mat) {
+
+  if ((mat[1] == 0.0 && mat[2] == 0.0) || (mat[0] == 0.0 && mat[3] == 0.0)) {
+    Base::apply_matrix(qubit, mat);
+    return;
+  }
+
+  // Convert qubit to array register for lambda functions
+  areg_t<1> qubits = {{qubit}};
+  if(!apply_matrix_avx<data_t>(Base::data_, Base::data_size_, qubits,
+      (void*) Base::convert(mat).data(), _calculate_num_threads())){
+    Base::apply_matrix(qubit, mat);
+  }
+}
+
+template <typename data_t>
+void QubitVectorAvx2<data_t>::apply_matrix(const reg_t &qubits,
+                                          const cvector_t<double> &mat) {
+  if(!apply_matrix_avx<data_t>(Base::data_, Base::data_size_, qubits,
+        (void*) Base::convert(mat).data(), _calculate_num_threads())){
+      Base::apply_matrix(qubits, mat);
+    }
+}
+
+template <typename data_t>
+uint_t QubitVectorAvx2<data_t>::_calculate_num_threads(){
+  if(Base::num_qubits_ > Base::omp_threshold_ &&  Base::omp_threads_ > 1){
+       return Base::omp_threads_;
+  }
+  return 1;
+}
+#endif
+
 }
 //------------------------------------------------------------------------------
 #endif // end module
