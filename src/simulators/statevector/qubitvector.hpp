@@ -2226,11 +2226,9 @@ double QubitVector<data_t, Derived>::expval_pauli(const reg_t &qubits,
   // Break string up into Z and X
   // With Y being both Z and X (plus a phase)
   const size_t N = qubits.size();
-  size_t num_x = 0;
-  size_t num_y = 0;
-  size_t num_z = 0;
-  uint_t x_indices = 0;
-  uint_t z_indices = 0;
+  uint_t x_mask = 0;
+  uint_t z_mask = 0;
+  uint_t num_y = 0;
   uint_t x_max = 0;
   for (size_t i = 0; i < N; ++i) {
     const auto bit = BITS[qubits[i]];
@@ -2238,29 +2236,34 @@ double QubitVector<data_t, Derived>::expval_pauli(const reg_t &qubits,
       case 'I':
         break;
       case 'X': {
-        x_indices += bit;
+        x_mask += bit;
         x_max = std::max(x_max, (qubits[i] + 1));
-        num_x++;
         break;
       }
       case 'Z': {
-        z_indices += bit;
-        num_z++;
+        z_mask += bit;
         break;
       }
       case 'Y': {
-        x_indices += bit;
-        z_indices += bit;
+        x_mask += bit;
+        z_mask += bit;
         num_y++;
         break;
       }
+      default:
+        throw std::invalid_argument("Invalid Pauli \"" + std::to_string(pauli[N - 1 - i]) + "\".");
     }
   }
-  // General case
+
+  // Special case for only I Paulis
+  if (x_mask + z_mask == 0) {
+    return norm();
+  }
+
   // Compute the overall phase of the operator.
-  // This is (-1j) ** number of Y terms
+  // This is (-1j) ** number of Y terms modulo 4
   std::complex<data_t> phase(1, 0);
-  switch (num_y % 4) {
+  switch (num_y & 3) {
     case 0:
       // phase = 1
       break;
@@ -2276,102 +2279,28 @@ double QubitVector<data_t, Derived>::expval_pauli(const reg_t &qubits,
       // phase = 1j
       phase = std::complex<data_t>(0, 1);
       break;
-  }
-
-  // Special case for only Z & I Paulis
-  if (num_x + num_y == 0) {
-    // All I Paulis returns the norm of the state
-    if (num_z == 0)
-      return norm();
-    auto lambda = [&](const int_t i, double &val_re, double &val_im)->void {
-      (void)val_im; // unused
-      const auto val = std::real(data_[i] * std::conj(data_[i]));
-      val_re += (__builtin_popcountll(i & z_indices) % 2) ? -val: val;
-    };
-    return std::real(apply_reduction_lambda(lambda));
-  }
-
-  // Special case for only X & I Paulis
-  if (num_z + num_y == 0) {
-    auto lambda = [&](const int_t i, double &val_re, double &val_im)->void {
-      (void)val_im; // unused
-      val_re += std::real(data_[i ^ x_indices] * std::conj(data_[i]));
-    };
-    return std::real(apply_reduction_lambda(lambda));
   }
 
   auto lambda = [&](const int_t i, double &val_re, double &val_im)->void {
     (void)val_im; // unused
     int_t base = ((i >> (x_max + 1)) + (i << x_max)) % data_size_;
-    const auto val = std::real(data_[base ^ x_indices] * phase * std::conj(data_[base])) * 2;
-    val_re += (__builtin_popcountll(base & z_indices) % 2) ? -val : val;
+    auto val = std::real(phase * data_[base ^ x_mask] * std::conj(data_[base])) * 2;
+    if (z_mask) {
+      // Portable implementation of __builtin_popcountll
+      auto count = base & z_mask;
+      count = (count & 0x5555555555555555) + ((count >> 1) & 0x5555555555555555);
+      count = (count & 0x3333333333333333) + ((count >> 2) & 0x3333333333333333);
+      count = (count & 0x0f0f0f0f0f0f0f0f) + ((count >> 4) & 0x0f0f0f0f0f0f0f0f);
+      count = (count & 0x00ff00ff00ff00ff) + ((count >> 8) & 0x00ff00ff00ff00ff);
+      count = (count & 0x0000ffff0000ffff) + ((count >> 16) & 0x0000ffff0000ffff);
+      count = (count & 0x00000000ffffffff) + ((count >> 32) & 0x00000000ffffffff);
+      if (count & 1) {
+        val = -val;
+      }
+    }
+    val_re += val;
   };
   return std::real(apply_reduction_lambda(lambda, size_t(0), data_size_ >> 1));
-}
-template <typename data_t, typename Derived>
-std::vector<double> QubitVector<data_t, Derived>::expval_pauli(const reg_t &qubits, const std::vector<std::string> &paulis) const {
-
-  std::vector<uint_t> x_indices;
-  std::vector<uint_t> z_indices;
-  std::vector<std::complex<data_t>> phases;
-  std::vector<double> expvals;
-
-  for (auto& pauli : paulis) {
-    uint_t x_count = count_pauli_operator(qubits, pauli, 'X');
-    uint_t y_count = count_pauli_operator(qubits, pauli, 'Y');
-    uint_t z_count = count_pauli_operator(qubits, pauli, 'Z');
-
-    size_t num_x = __builtin_popcountll(x_count);
-    size_t num_y = __builtin_popcountll(y_count);
-    size_t num_z = __builtin_popcountll(z_count);
-
-    x_indices.push_back(x_count | y_count);
-    z_indices.push_back(z_count | y_count);
-
-    std::complex<data_t> phase(1, 0);
-    switch (num_y % 4) {
-    case 0:
-      // phase = 1
-      break;
-    case 1:
-      // phase = -1j
-      phase = std::complex<data_t>(0, -1);
-      break;
-    case 2:
-      // phase = -1
-      phase = std::complex<data_t>(-1, 0);
-      break;
-    case 3:
-      // phase = 1j
-      phase = std::complex<data_t>(0, 1);
-      break;
-    }
-    phases.push_back(phase);
-  }
-
-  const size_t pauli_size = paulis.size();
-  double* reals = reinterpret_cast<double*>(malloc(sizeof(double) * pauli_size));
-  for (size_t i = 0; i < pauli_size; ++i)
-    reals[i] = .0;
-
-#pragma omp parallel reduction(+:reals[:pauli_size]) if (num_qubits_ > omp_threshold_ && omp_threads_ > 1)         \
-                                               num_threads(omp_threads_)
-  {
-#pragma omp for
-    for (int_t i = 0; i < data_size_ >> 1; ++i) {
-      for (unsigned k = 0; k < pauli_size; ++k) {
-          const auto val = std::real(data_[i ^ x_indices[k]] * phases[k] * std::conj(data_[i]));
-          reals[k] += (__builtin_popcountll(i & z_indices[k]) % 2) ? -val : val;
-      };
-    }
-  }
-
-  for (size_t i = 0; i < pauli_size; ++i)
-    expvals.push_back(reals[i]);
-
-  free(reals);
-
-  return expvals;
 }
 
 //------------------------------------------------------------------------------
