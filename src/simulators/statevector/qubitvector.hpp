@@ -2231,6 +2231,7 @@ double QubitVector<data_t, Derived>::expval_pauli(const reg_t &qubits,
   size_t num_z = 0;
   uint_t x_indices = 0;
   uint_t z_indices = 0;
+  uint_t x_max = 0;
   for (size_t i = 0; i < N; ++i) {
     const auto bit = BITS[qubits[i]];
     switch (pauli[N - 1 - i]) {
@@ -2238,6 +2239,7 @@ double QubitVector<data_t, Derived>::expval_pauli(const reg_t &qubits,
         break;
       case 'X': {
         x_indices += bit;
+        x_max = std::max(x_max, (qubits[i] + 1));
         num_x++;
         break;
       }
@@ -2298,15 +2300,14 @@ double QubitVector<data_t, Derived>::expval_pauli(const reg_t &qubits,
     return std::real(apply_reduction_lambda(lambda));
   }
 
-
   auto lambda = [&](const int_t i, double &val_re, double &val_im)->void {
     (void)val_im; // unused
-    const auto val = std::real(data_[i ^ x_indices] * phase * std::conj(data_[i]));
-    val_re += (__builtin_popcountll(i & z_indices) % 2) ? -val : val;
+    int_t base = ((i >> (x_max + 1)) + (i << x_max)) % data_size_;
+    const auto val = std::real(data_[base ^ x_indices] * phase * std::conj(data_[base])) * 2;
+    val_re += (__builtin_popcountll(base & z_indices) % 2) ? -val : val;
   };
-  return std::real(apply_reduction_lambda(lambda));
+  return std::real(apply_reduction_lambda(lambda, size_t(0), data_size_ >> 1));
 }
-
 template <typename data_t, typename Derived>
 std::vector<double> QubitVector<data_t, Derived>::expval_pauli(const reg_t &qubits, const std::vector<std::string> &paulis) const {
 
@@ -2357,7 +2358,7 @@ std::vector<double> QubitVector<data_t, Derived>::expval_pauli(const reg_t &qubi
                                                num_threads(omp_threads_)
   {
 #pragma omp for
-    for (int_t i = 0; i < data_size_; ++i) {
+    for (int_t i = 0; i < data_size_ >> 1; ++i) {
       for (unsigned k = 0; k < pauli_size; ++k) {
           const auto val = std::real(data_[i ^ x_indices[k]] * phases[k] * std::conj(data_[i]));
           reals[k] += (__builtin_popcountll(i & z_indices[k]) % 2) ? -val : val;
@@ -2372,7 +2373,6 @@ std::vector<double> QubitVector<data_t, Derived>::expval_pauli(const reg_t &qubi
 
   return expvals;
 }
-
 
 //------------------------------------------------------------------------------
 } // end namespace QV

@@ -552,11 +552,12 @@ void State<statevec_t>::snapshot_pauli_expval(const Operations::Op &op,
     throw std::invalid_argument("Invalid expval snapshot (Pauli components are empty).");
   }
 
+/*
+
   std::vector<std::string> paulis;
   for (const auto &param : op.params_expval_pauli)
     paulis.push_back(param.second);
 
-  // Accumulate expval components
   std::vector<double> expvals = BaseState::qreg_.expval_pauli(op.qubits, paulis);
 
   // Accumulate expval components
@@ -565,6 +566,14 @@ void State<statevec_t>::snapshot_pauli_expval(const Operations::Op &op,
     const auto& coeff = op.params_expval_pauli[i].first;
     const auto& v = expvals[i];
     expval += coeff * v;
+  }
+*/
+  // Accumulate expval components
+  complex_t expval(0., 0.);
+  for (const auto &param : op.params_expval_pauli) {
+    const auto& coeff = param.first;
+    const auto& pauli = param.second;
+    expval += coeff * BaseState::qreg_.expval_pauli(op.qubits, pauli);
   }
 
   // Add to snapshot
