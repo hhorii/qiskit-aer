@@ -1059,11 +1059,6 @@ public:
   // The Pauli is input as a length N string of I,X,Y,Z characters.
   double expval_pauli(const reg_t &qubits, const std::string &pauli) const;
 
-<<<<<<< HEAD
-  std::vector<double> expval_pauli(const reg_t &qubits,
-                             const std::vector<std::string> &paulis) const;
-=======
->>>>>>> cjwood/feature/pauli
   //-----------------------------------------------------------------------
   // JSON configuration settings
   //-----------------------------------------------------------------------
@@ -4532,25 +4527,6 @@ void QubitVectorThrust<data_t>::DebugDump(void) const
  ******************************************************************************/
 
 template <typename data_t>
-<<<<<<< HEAD
-double QubitVectorThrust<data_t>::expval_pauli(const reg_t &qubits,
-                                         const std::string &pauli) const {
-  // TODO!
-  throw std::runtime_error(
-    "Pauli expectation value is not implemented for GPU statevector."
-  );
-  return 0;
-}                                       
-
-template <typename data_t>
-std::vector<double> QubitVectorThrust<data_t>::expval_pauli(
-            const reg_t &qubits, const std::vector<std::string> &paulis) const {
-  // TODO!
-  throw std::runtime_error(
-    "Pauli expectation value is not implemented for GPU statevector."
-  );
-  return std::vector<double>();
-=======
 class expval_pauli_func : public GateFuncBase
 {
 protected:
@@ -4673,7 +4649,6 @@ double QubitVectorThrust<data_t>::expval_pauli(const reg_t &qubits,
       break;
   }
   return apply_function(expval_pauli_func<data_t>(x_mask, z_mask, phase),qubits);
->>>>>>> cjwood/feature/pauli
 }
 
 //------------------------------------------------------------------------------
