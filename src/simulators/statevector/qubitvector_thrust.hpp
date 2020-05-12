@@ -1059,6 +1059,8 @@ public:
   // The Pauli is input as a length N string of I,X,Y,Z characters.
   double expval_pauli(const reg_t &qubits, const std::string &pauli) const;
 
+  std::vector<double> expval_pauli(const reg_t &qubits,
+                             const std::vector<std::string> &paulis) const;
   //-----------------------------------------------------------------------
   // JSON configuration settings
   //-----------------------------------------------------------------------
