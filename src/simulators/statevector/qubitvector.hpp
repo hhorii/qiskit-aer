@@ -2175,30 +2175,54 @@ reg_t QubitVector<data_t, Derived>::sample_measure(const std::vector<double> &rn
       }
     } // end omp parallel
 
-    #pragma omp parallel if (num_qubits_ > omp_threshold_ && omp_threads_ > 1) num_threads(omp_threads_)
-    {
-      #pragma omp for
-      for (int_t i = 0; i < SHOTS; ++i) {
-        double rnd = rnds[i];
-        double p = .0;
-        int_t sample = 0;
-        for (uint_t j = 0; j < idxs.size(); ++j) {
-          if (rnd < (p + idxs[j])) {
-            break;
-          }
-          p += idxs[j];
-          sample += loop;
-        }
+		// accmulate indices
+    for (uint_t i = 1; i < INDEX_END; ++i)
+      idxs[i] += idxs[i - 1];
 
-        for (; sample < END - 1; ++sample) {
+    // reduce rounding error
+    double correction = 1.0 / idxs[INDEX_END - 1];
+    for (uint_t i = 1; i < INDEX_END - 1; ++i)
+      idxs[i] *= correction;
+
+		idxs[INDEX_END - 1] = 1.0;
+
+		auto rnds_ = rnds;
+
+	  std::sort(rnds_.begin(), rnds_.end());
+
+    #pragma omp parallel for if (num_qubits_ > omp_threshold_ && omp_threads_ > 1) num_threads(omp_threads_)
+    for (uint_t i = 0; i < INDEX_END; ++i) {
+      uint_t start_sample_idx = 0;
+      if (i > 0) {
+        for (uint_t sample_idx = 0; sample_idx < SHOTS; ++sample_idx) {
+          if (rnds_[sample_idx] < idxs[i - 1])
+            continue;
+          start_sample_idx = sample_idx;
+          break;
+        }
+      }
+      uint_t end_sample_idx = SHOTS;
+      for (uint_t sample_idx = start_sample_idx; sample_idx < SHOTS; ++sample_idx) {
+        if (rnds_[sample_idx] < idxs[i])
+          continue;
+        end_sample_idx = sample_idx;
+        break;
+      }
+
+      auto sample = loop * i;
+      double p = (i == 0) ? 0.0 : idxs[i - 1];
+
+      for (uint_t sample_idx = start_sample_idx; sample_idx < end_sample_idx; ++sample_idx) {
+        auto rnd = rnds_[sample_idx];
+        for (; sample < loop * (i + 1) - 1; ++sample) {
           p += probability(sample);
           if (rnd < p){
             break;
           }
         }
-        samples[i] = sample;
+        samples[sample_idx] = sample;
       }
-    } // end omp parallel
+    }
   }
   return samples;
 }
