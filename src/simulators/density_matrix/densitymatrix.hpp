@@ -36,7 +36,7 @@ class DensityMatrix : public UnitaryMatrix<data_t> {
 
 public:
   // Parent class aliases
-  using BaseVector = QubitVector<data_t>;
+  using BaseVector = QubitVectorAvx2<data_t>;
   using BaseMatrix = UnitaryMatrix<data_t>;
 
   //-----------------------------------------------------------------------

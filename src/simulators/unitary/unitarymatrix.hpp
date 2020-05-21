@@ -18,6 +18,7 @@
 
 #include "framework/utils.hpp"
 #include "simulators/statevector/qubitvector.hpp"
+#include "simulators/statevector/qubitvector_avx2.hpp"
 
 namespace QV {
 
@@ -32,11 +33,11 @@ namespace QV {
 // of the vectorized 2*N qubit vector also on qubit-n.
 
 template <class data_t = double>
-class UnitaryMatrix : public QubitVector<data_t> {
+class UnitaryMatrix : public QubitVectorAvx2<data_t> {
 
 public:
   // Type aliases
-  using BaseVector = QubitVector<data_t>;
+  using BaseVector = QubitVectorAvx2<data_t>;
 
   //-----------------------------------------------------------------------
   // Constructors and Destructor
