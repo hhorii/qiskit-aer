@@ -26,6 +26,29 @@
 #include "qubitvector.hpp"
 
 namespace {
+inline void ccpuid(int cpu_info[4], int function_id){
+#ifdef _MSC_VER
+  __cpuid(cpu_info, function_id);
+#elif defined(__GNUC__)
+  __cpuid(function_id,
+    cpu_info[0],
+    cpu_info[1],
+    cpu_info[2],
+    cpu_info[3]);
+#else // We don't support this platform intrinsics
+  cpu_info[0] = cpu_info[1] = cpu_info[2] = cpu_info[3] = 0;
+#endif
+}
+
+inline void cpuidex(int cpu_info[4], int function_id, int subfunction_id){
+#ifdef _MSC_VER
+  __cpuidex(cpu_info, function_id, subfunction_id);
+#elif defined(__GNUC__)
+  __cpuid_count(function_id, subfunction_id, cpu_info[0], cpu_info[1], cpu_info[2], cpu_info[3]);
+#else // We don't support this platform intrinsics
+   cpu_info[0] = cpu_info[1] = cpu_info[2] = cpu_info[3] = 0;
+#endif
+}
 
 template<typename FloatType>
 using m256_t = typename std::conditional<std::is_same<FloatType, double>::value, __m256d, __m256>::type;
@@ -871,6 +894,38 @@ inline Avx apply_matrix_avx(
   default:
     return Avx::NotApplied;
   }
+}
+
+inline bool is_avx2_supported(){
+  static bool cached = false;
+  static bool is_supported = false;
+  if(cached)
+    return is_supported;
+
+  std::array<int, 4> cpui;
+ ccpuid(cpui.data(), 0);
+  auto num_ids = cpui[0];
+  if(num_ids < 7){
+    cached = true;
+    is_supported = false;
+    return false;
+  }
+
+  std::vector<std::array<int, 4>> data;
+  for (int i = 0; i <= num_ids; ++i){
+      cpuidex(cpui.data(), i, 0);
+      data.push_back(cpui);
+  }
+
+  std::bitset<32> f_1_ECX = data[1][2];
+  std::bitset<32> f_7_EBX = data[7][1];
+
+  bool is_fma_supported = (f_1_ECX[12] & 1);
+  bool is_avx2_supported = (f_7_EBX[5] & 1);
+
+  cached = true;
+  is_supported = is_fma_supported && is_avx2_supported;
+  return is_supported;
 }
 
 } // namespace QV

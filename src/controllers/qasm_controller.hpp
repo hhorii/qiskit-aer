@@ -22,11 +22,10 @@
 #include "simulators/stabilizer/stabilizer_state.hpp"
 #include "simulators/statevector/statevector_state.hpp"
 #include "simulators/statevector/qubitvector.hpp"
-#include "simulators/statevector/qubitvector_avx2.hpp"
+#include "simulators/statevector/qvintrin.hpp"
 #include "simulators/superoperator/superoperator_state.hpp"
 #include "transpile/delay_measure.hpp"
 #include "transpile/fusion.hpp"
-#include "framework/avx2_detect.hpp"
 
 
 namespace AER {
@@ -371,25 +370,12 @@ ExperimentData QasmController::run_circuit(const Circuit &circ,
   // Validate circuit for simulation method
   switch (simulation_method(circ, noise, true)) {
     case Method::statevector: {
-      bool avx2_enabled = is_avx2_supported();
-
       if (simulation_precision_ == Precision::double_precision) {
-        if(avx2_enabled){
-          return run_circuit_helper<Statevector::State<QV::QubitVectorAvx2<double>>>(
-            circ, noise, config, shots, rng_seed, initial_statevector_,
-            Method::statevector);
-        }
         // Double-precision Statevector simulation
         return run_circuit_helper<Statevector::State<QV::QubitVector<double>>>(
             circ, noise, config, shots, rng_seed, initial_statevector_,
             Method::statevector);
       } else {
-        if(avx2_enabled){
-          // Single-precision Statevector simulation
-          return run_circuit_helper<Statevector::State<QV::QubitVectorAvx2<float>>>(
-            circ, noise, config, shots, rng_seed, initial_statevector_,
-            Method::statevector);
-        }
         // Single-precision Statevector simulation
         return run_circuit_helper<Statevector::State<QV::QubitVector<float>>>(
             circ, noise, config, shots, rng_seed, initial_statevector_,

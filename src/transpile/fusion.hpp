@@ -18,7 +18,7 @@
 #include <chrono>
 
 #include "transpile/circuitopt.hpp"
-#include "framework/avx2_detect.hpp"
+#include "simulators/statevector/qvintrin.hpp"
 #include "simulators/unitary/unitary_state.hpp"
 #include "simulators/superoperator/superoperator_state.hpp"
 
@@ -447,7 +447,7 @@ double Fusion::estimate_cost(const std::vector<op_t>& ops,
   for (uint_t i = from; i <= until; ++i)
     add_fusion_qubits(fusion_qubits, ops[i]);
 
-  if(is_avx2_supported()){
+  if(QV::is_intrinsics()){
     switch (fusion_qubits.size()) {
       case 1:
         // [[ falling through :) ]]
