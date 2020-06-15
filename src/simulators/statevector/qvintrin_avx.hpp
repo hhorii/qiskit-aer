@@ -15,6 +15,7 @@
 #ifndef _qv_intrinsics_avx_hpp_
 #define _qv_intrinsics_avx_hpp_
 
+#include <bitset>
 #include <cstdint>
 #include <cstring>
 #include <immintrin.h>
