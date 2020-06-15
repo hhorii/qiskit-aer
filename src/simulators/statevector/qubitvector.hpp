@@ -34,12 +34,6 @@
 
 namespace QV {
 
-// Type aliases
-using uint_t = uint64_t;
-using int_t = int64_t;
-using reg_t = std::vector<uint_t>;
-using indexes_t = std::unique_ptr<uint_t[]>;
-template <size_t N> using areg_t = std::array<uint_t, N>;
 template <typename T> using cvector_t = std::vector<std::complex<T>>;
 
 //============================================================================
