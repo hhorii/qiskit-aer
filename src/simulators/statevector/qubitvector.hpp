@@ -446,6 +446,35 @@ protected:
   std::complex<double> apply_reduction_lambda(Lambda&& func,
                                               const list_t &qubits,
                                               const param_t &params) const;
+
+
+  //-----------------------------------------------------------------------
+  // Statevector Sampler Utilities
+  //-----------------------------------------------------------------------
+
+  //----------------------------------------------------------------
+  // Function name: get_accumulated_probabilities_vector
+  // Description: Computes the accumulated probabilities from 0
+  // Parameters: qubits - the qubits for which we compute probabilities
+  // Returns: acc_probvector - the vector of accumulated probabilities
+  //          index_vec - the base values whose probabilities are not 0
+  // For example:
+  // if probabilities vector is: 0.5 (00), 0.0 (01), 0.2 (10), 0.3 (11), then
+  // acc_probvector = 0.0,    0.5,    0.7,   1.0
+  // index_vec =      0 (00), 2 (10), 3(11)
+  //----------------------------------------------------------------
+  void get_accumulated_probabilities_vector(std::vector<double>& acc_probvector,
+              reg_t& index_vec) const;
+
+  // Return M sampled outcomes for Z-basis measurement of all qubits
+  // by using accumulated probabilities
+  reg_t sample_measure_with_bs(const std::vector<double> &rnds) const;
+
+  // Return M sampled outcomes for Z-basis measurement of all qubits
+  // with consideration of memory affinity
+  reg_t sample_measure_with_memory_affinity(const std::vector<double> &rnds) const;
+
+
 };
 
 /*******************************************************************************
@@ -1927,11 +1956,76 @@ std::vector<double> QubitVector<data_t>::probabilities(const reg_t &qubits) cons
   return probs;
 }
 
+template <typename data_t>
+void QubitVector<data_t>::get_accumulated_probabilities_vector(std::vector<double>& acc_probvector, 
+							       reg_t& index_vec) const {
+  uint_t size = 1LL << num_qubits_;
+  uint_t j = 1;
+  acc_probvector.push_back(0.0);
+  for (uint_t i=0; i<size; i++) {
+    if (!AER::Linalg::almost_equal(probability(i), 0.0)) {
+      index_vec.push_back(i);
+      acc_probvector.push_back(acc_probvector[j-1] + probability(i));
+      j++;
+    }
+  }
+}
+
 //------------------------------------------------------------------------------
 // Sample measure outcomes
 //------------------------------------------------------------------------------
 template <typename data_t>
 reg_t QubitVector<data_t>::sample_measure(const std::vector<double> &rnds) const {
+
+  reg_t ret;
+  std::string sampling_method;
+  if (sample_measure_index_size_ < 0) {
+    ret = sample_measure_with_bs(rnds);
+  } else {
+    ret = sample_measure_with_memory_affinity(rnds);
+  }
+  auto timer_stop = myclock_t::now();
+  return ret;
+
+}
+
+template <typename data_t>
+reg_t QubitVector<data_t>::sample_measure_with_bs(const std::vector<double> &rnds) const {
+  const uint_t SHOTS = rnds.size();
+  reg_t samples;
+  samples.assign(SHOTS, 0);
+  std::vector<double> acc_probvector;
+  reg_t index_vec;
+  get_accumulated_probabilities_vector(acc_probvector, index_vec);
+  uint_t accvec_size = acc_probvector.size();
+  uint_t rnd_index;
+#pragma omp parallel for if (SHOTS > omp_threshold_ && omp_threads_ > 1) num_threads(omp_threads_)
+  for (int_t i = 0; i < SHOTS; ++i) {
+    double rnd = rnds[i];
+
+    // binary search for which range rnd is in
+    uint_t first = 0;
+    uint_t last = accvec_size-1;
+    uint_t mid = 0;
+    while(true) {
+      if (first >= last-1) {
+        rnd_index = first;
+        break;
+      }
+      mid = (first+last)/2;
+      if (rnd <= acc_probvector[mid])
+        last = mid;
+      else
+        first = mid;
+    }
+    
+    samples[i] = index_vec[rnd_index];
+  }
+  return samples;
+}
+
+template <typename data_t>
+reg_t QubitVector<data_t>::sample_measure_with_memory_affinity(const std::vector<double> &rnds) const {
 
   const int_t END = 1LL << num_qubits();
   const int_t SHOTS = rnds.size();
@@ -1957,8 +2051,7 @@ reg_t QubitVector<data_t>::sample_measure(const std::vector<double> &rnds) const
         samples[i] = sample;
       }
     } // end omp parallel
-  }
-  // Qubit number is above index size, loop over index blocks
+  }  // Qubit number is above index size, loop over index blocks
   else {
     // Initialize indexes
     std::vector<double> idxs;
