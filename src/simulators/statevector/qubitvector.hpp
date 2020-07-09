@@ -30,6 +30,7 @@
 
 #include "indexes.hpp"
 #include "framework/json.hpp"
+#include "framework/utils.hpp"
 #include "qvintrin.hpp"
 
 namespace QV {

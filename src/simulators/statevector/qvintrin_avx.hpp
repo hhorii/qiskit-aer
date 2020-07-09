@@ -735,7 +735,9 @@ inline bool _apply_matrix_float(  //
   float* fmat_orig = (float*) mat;
 
   float fmat[(1 << (N * 2 + 1))];
-  memcpy(fmat, mat, sizeof(float) * (1 << (N * 2 + 1)));
+  // memcpy(fmat, mat, sizeof(float) * (1 << (N * 2 + 1)));
+  for (auto i = 0; i < (1 << (N * 2 + 1)); ++i)
+    fmat[i] = fmat_orig[i];
 
 // transpose
   for (size_t i = 0; i < (1U << N); ++i) {
@@ -746,7 +748,10 @@ inline bool _apply_matrix_float(  //
   }
 
   uint64_t qregs[N];
-  memcpy(qregs, qregs_, sizeof(uint64_t) * N);
+  // memcpy(qregs, qregs_, sizeof(uint64_t) * N);
+  for (auto i = 0; i < N; ++i)
+    qregs[i] = qregs_[i];
+
   if (N > 1) {
     _reorder<N>(qregs_, qregs, fmat);
   }
@@ -786,10 +791,12 @@ inline bool _apply_matrix_double(  //
   if (data_size <= 4)
     return false;
 
-  double dmat[(1 << (N * 2 + 1))];
-  memcpy(dmat, mat, sizeof(uint64_t) * (1 << (N * 2 + 1)));
-
   double* dmat_orig = (double*) mat;
+
+  double dmat[(1 << (N * 2 + 1))];
+  // memcpy(dmat, mat, sizeof(uint64_t) * (1 << (N * 2 + 1)));
+  for (auto i = 0; i < (1 << (N * 2 + 1)); ++i)
+    dmat[i] = dmat_orig[i];
 
 // transpose
   for (size_t i = 0; i < (1U << N); ++i) {
@@ -800,7 +807,9 @@ inline bool _apply_matrix_double(  //
   }
 
   uint64_t qregs[N];
-  memcpy(qregs, qregs_, sizeof(uint64_t) * N);
+  // memcpy(qregs, qregs_, sizeof(uint64_t) * N);
+  for (auto i = 0; i < N; ++i)
+    qregs[i] = qregs_[i];
   if (N > 1) {
     _reorder<N>(qregs_, qregs, dmat);
   }

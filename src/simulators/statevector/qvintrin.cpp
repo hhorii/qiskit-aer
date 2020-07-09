@@ -13,7 +13,7 @@
  */
 #include "qvintrin.hpp"
 
-#ifdef __PPC__ | __PPC64__
+#if defined(__PPC__)  || defined(__PPC64__)
 // PPC
 #elif defined(__arm__) || defined(__arm64__)
 // ARM
@@ -30,7 +30,7 @@
 using namespace QV;
 
 bool is_intrinsics () {
-#ifdef __PPC__ | __PPC64__
+#if defined(__PPC__)  || defined(__PPC64__)
   return false;
 #elif defined(__arm__) || defined(__arm64__)
   return false;
@@ -46,7 +46,7 @@ bool apply_matrix_opt(
     const uint64_t qregs_size,
     const float* fmat,
     const uint_t omp_threads) {
-#ifdef __PPC__ | __PPC64__
+#if defined(__PPC__)  || defined(__PPC64__)
   return false;
 #elif defined(__arm__) || defined(__arm64__)
   return false;
@@ -63,7 +63,7 @@ bool apply_matrix_opt(
     const uint64_t qregs_size,
     const double* dmat,
     uint_t omp_threads) {
-#ifdef __PPC__ | __PPC64__
+#if defined(__PPC__)  || defined(__PPC64__)
   return false;
 #elif defined(__arm__) || defined(__arm64__)
   return false;
