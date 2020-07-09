@@ -27,7 +27,7 @@
 #include "qvintrin_avx.hpp"
 #endif
 
-using namespace QV;
+namespace QV {
 
 bool is_intrinsics () {
 #if defined(__PPC__)  || defined(__PPC64__)
@@ -72,5 +72,5 @@ bool apply_matrix_opt(
       qv_data, data_size, qregs, qregs_size, dmat, omp_threads);
 #endif
 }
-
+}
 

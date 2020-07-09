@@ -31,6 +31,7 @@
 #include "indexes.hpp"
 #include "framework/json.hpp"
 #include "framework/utils.hpp"
+#define _QV_HEDDER_ONLY
 #include "qvintrin.hpp"
 
 namespace QV {
