@@ -311,6 +311,9 @@ public:
   // Get the sample_measure index size
   int get_sample_measure_index_size() {return sample_measure_index_size_;}
 
+  // Use SIMD instructions
+  void use_intrinsics(bool use) { use_intrinsics_ = use; }
+
 protected:
 
   //-----------------------------------------------------------------------
@@ -945,7 +948,13 @@ template <typename data_t>
 void QubitVector<data_t>::apply_matrix(const reg_t &qubits,
                                        const cvector_t<double> &mat) {
 
-  if (use_intrinsics_ && apply_matrix_opt(data_, data_size_, qubits, convert(mat), omp_threads_managed())) {
+  if (use_intrinsics_ && apply_matrix_opt(
+                                      reinterpret_cast<data_t *>(data_),
+                                      data_size_,
+                                      qubits.data(),
+                                      qubits.size(),
+                                      reinterpret_cast<data_t *>(convert(mat).data()),
+                                      omp_threads_managed())) {
     return;
   }
 
@@ -1521,7 +1530,13 @@ void QubitVector<data_t>::apply_matrix(const uint_t qubit,
     return;
   }
 
-  if (use_intrinsics_ && apply_matrix_opt(data_, data_size_, reg_t{qubit}, convert(mat), omp_threads_managed())) {
+  if (use_intrinsics_ && apply_matrix_opt(
+                                  reinterpret_cast<data_t *>(data_),
+                                  data_size_,
+                                  reg_t{qubit}.data(),
+                                  1,
+                                  reinterpret_cast<data_t *>(convert(mat).data()),
+                                  omp_threads_managed())) {
     return;
   }
 

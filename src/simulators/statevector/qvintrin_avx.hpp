@@ -15,19 +15,11 @@
 #ifndef _qv_intrinsics_avx_hpp_
 #define _qv_intrinsics_avx_hpp_
 
-#include <bitset>
-#include <cstdint>
-#include <cstring>
 #include <immintrin.h>
-#include <algorithm>
-#include <vector>
-#include <memory>
 #include <type_traits>
-#include "indexes.hpp"
-#include "qubitvector.hpp"
 
 namespace {
-inline void ccpuid(int cpu_info[4], int function_id){
+inline void ccpuid(int cpu_info[4], int function_id) {
 #ifdef _MSC_VER
   __cpuid(cpu_info, function_id);
 #elif defined(__GNUC__)
@@ -40,342 +32,193 @@ inline void ccpuid(int cpu_info[4], int function_id){
   cpu_info[0] = cpu_info[1] = cpu_info[2] = cpu_info[3] = 0;
 #endif
 }
+}
 
-inline void cpuidex(int cpu_info[4], int function_id, int subfunction_id){
+inline void cpuidex(int cpu_info[4], int function_id, int subfunction_id) {
 #ifdef _MSC_VER
   __cpuidex(cpu_info, function_id, subfunction_id);
 #elif defined(__GNUC__)
   __cpuid_count(function_id, subfunction_id, cpu_info[0], cpu_info[1], cpu_info[2], cpu_info[3]);
 #else // We don't support this platform intrinsics
-   cpu_info[0] = cpu_info[1] = cpu_info[2] = cpu_info[3] = 0;
+  cpu_info[0] = cpu_info[1] = cpu_info[2] = cpu_info[3] = 0;
 #endif
 }
 
-template<typename FloatType>
-using m256_t = typename std::conditional<std::is_same<FloatType, double>::value, __m256d, __m256>::type;
-
-// These Views are helpers for encapsulate QubitVector::data_ access, specifically
-// for SIMD vectorization.
-// The data_ variable is allocated dynamically and of the type:
-// std::complex<double/float>*, and SIMD operations requires getting
-// a number of continuous values to vectorice the operation.
-// As we are dealing with memory layout of the form:
-//  [real|imag|real|imag|real|imag|...]
-// we require special indexing to the elements.
-template<typename FloatType>
-struct RealVectorView {
-  RealVectorView() = delete;
-  // Unfortunately, shared_ptr implies allocations and we cannot afford
-  // them in this piece of code, so this is the reason to use raw pointers.
-  RealVectorView(std::complex<FloatType>* data) : data(data){}
-  inline FloatType* operator[](size_t i){
-    return &reinterpret_cast<FloatType*>(data)[i * 2];
-  }
-  inline const FloatType* operator[](size_t i) const {
-    return &reinterpret_cast<const FloatType*>(data)[i * 2];
-  }
-  std::complex<FloatType>* data = nullptr;
-};
-
-template<typename FloatType>
-struct ImaginaryVectorView : std::false_type {};
-
-template<>
-struct ImaginaryVectorView<double> {
-  ImaginaryVectorView() = delete;
-  ImaginaryVectorView(std::complex<double>* data) : data(data){}
-  // SIMD vectorization takes n bytes depending on the underlaying type, so
-  // for doubles, SIMD loads 4 consecutive values (4 * sizeof(double) = 32 bytes)
-  inline double* operator[](size_t i){
-    return &reinterpret_cast<double*>(data)[i * 2 + 4];
-  }
-  inline const double* operator[](size_t i) const {
-    return &reinterpret_cast<const double*>(data)[i * 2 + 4];
-  }
-  std::complex<double>* data = nullptr;
-};
-
-template<>
-struct ImaginaryVectorView<float> {
-  ImaginaryVectorView() = delete;
-  ImaginaryVectorView(std::complex<float>* data) : data(data){}
-  // SIMD vectorization takes n bytes depending on the underlaying type, so
-  // for floats, SIMD loads 8 consecutive (8 * sizeof(float) = 32 bytes)
-  inline float* operator[](size_t i){
-    return &reinterpret_cast<float*>(data)[i * 2 + 8];
-  }
-  inline const float* operator[](size_t i) const {
-    return &reinterpret_cast<const float*>(data)[i * 2 + 8];
-  }
-  std::complex<float>* data = nullptr;
-};
-
-static auto _mm256_mul(const m256_t<double>& left, const m256_t<double>& right){
-  return _mm256_mul_pd(left, right);
-}
-
-static auto _mm256_mul(const m256_t<float>& left, const m256_t<float>& right){
-  return _mm256_mul_ps(left, right);
-}
-
-static auto _mm256_fnmadd(const m256_t<double>& left, const m256_t<double>& right, const m256_t<double>& ret){
-  return _mm256_fnmadd_pd(left, right, ret);
-}
-
-static auto _mm256_fnmadd(const m256_t<float>& left, const m256_t<float>& right, const m256_t<float>& ret){
-  return _mm256_fnmadd_ps(left, right, ret);
-}
-
-static auto _mm256_fmadd(const m256_t<double>& left, const m256_t<double>& right, const m256_t<double>& ret){
-  return _mm256_fmadd_pd(left, right, ret);
-}
-
-static auto _mm256_fmadd(const m256_t<float>& left, const m256_t<float>& right, const m256_t<float>& ret){
-  return _mm256_fmadd_ps(left, right, ret);
-}
-
-static auto _mm256_set1(double d){
-  return _mm256_set1_pd(d);
-}
-
-static auto _mm256_set1(float f){
-  return _mm256_set1_ps(f);
-}
-
-static auto _mm256_load(double const* d){
-  return _mm256_load_pd(d);
-}
-
-static auto _mm256_load(float const* f){
-  return _mm256_load_ps(f);
-}
-
-static void _mm256_store(float* f, const m256_t<float>& c){
-  _mm256_store_ps(f, c);
-}
-
-static void _mm256_store(double* d, const m256_t<double>& c){
-  _mm256_store_pd(d, c);
-}
-
-template<typename FloatType>
-static inline void _mm_complex_multiply(m256_t<FloatType>& real_ret, m256_t<FloatType>& imag_ret, m256_t<FloatType>& real_left,
-  m256_t<FloatType>& imag_left, const m256_t<FloatType>& real_right, const m256_t<FloatType>& imag_right){
-    real_ret = _mm256_mul(real_left, real_right);
-    imag_ret = _mm256_mul(real_left, imag_right);
-    real_ret = _mm256_fnmadd(imag_left, imag_right, real_ret);
-    imag_ret = _mm256_fmadd(imag_left, real_right, imag_ret);
-}
-
-template<typename FloatType>
-static inline void _mm_complex_multiply_add(m256_t<FloatType>& real_ret, m256_t<FloatType>& imag_ret, m256_t<FloatType>& real_left,
-  m256_t<FloatType>& imag_left, const m256_t<FloatType>& real_right, const m256_t<FloatType>& imag_right){
-    real_ret = _mm256_fmadd(real_left, real_right, real_ret);
-    imag_ret = _mm256_fmadd(real_left, imag_right, imag_ret);
-    real_ret = _mm256_fnmadd(imag_left, imag_right, real_ret);
-    imag_ret = _mm256_fmadd(imag_left, real_right, imag_ret);
-}
-
-template<typename FloatType>
-static inline void _mm_complex_inner_product(size_t dim, m256_t<FloatType> vreals[], m256_t<FloatType> vimags[],
-  const FloatType* cmplxs, m256_t<FloatType>& vret_real, m256_t<FloatType>& vret_imag,
-  m256_t<FloatType>& vtmp_0, m256_t<FloatType>& vtmp_1){
-    vtmp_0 = _mm256_set1(cmplxs[0]);
-    vtmp_1 = _mm256_set1(cmplxs[1]);
-    _mm_complex_multiply<FloatType>(vret_real, vret_imag, vreals[0], vimags[0], vtmp_0, vtmp_1);
-    for (size_t i = 1; i < dim; ++i){
-      vtmp_0 = _mm256_set1(cmplxs[i * 2]);
-      vtmp_1 = _mm256_set1(cmplxs[i * 2 + 1]);
-      _mm_complex_multiply_add<FloatType>(vret_real, vret_imag, vreals[i], vimags[i], vtmp_0, vtmp_1);
-    }
-}
-
-static inline void _mm_load_twoarray_complex(const double * real_addr_0, const double * imag_addr_1,
-  m256_t<double>& real_ret, m256_t<double>& imag_ret){
-    real_ret = _mm256_load(real_addr_0);
-    imag_ret = _mm256_load(imag_addr_1);
-    auto tmp0 = _mm256_permute4x64_pd(real_ret, 2 * 64 + 3 * 16 + 0 * 4 + 1 * 1);
-    auto tmp1 = _mm256_permute4x64_pd(imag_ret, 2 * 64 + 3 * 16 + 0 * 4 + 1 * 1);
-    real_ret = _mm256_blend_pd(real_ret, tmp1, 0b1010);
-    imag_ret = _mm256_blend_pd(tmp0, imag_ret, 0b1010);
-    real_ret = _mm256_permute4x64_pd(real_ret, 3 * 64 + 1 * 16 + 2 * 4 + 0 * 1);
-    imag_ret = _mm256_permute4x64_pd(imag_ret, 3 * 64 + 1 * 16 + 2 * 4 + 0 * 1);
-}
-
-static inline void _mm_load_twoarray_complex(const float * real_addr_0, const float * imag_addr_1,
-  m256_t<float>& real_ret, m256_t<float>& imag_ret){
-    real_ret = _mm256_load(real_addr_0);
-    imag_ret = _mm256_load(imag_addr_1);
-    auto tmp0 = _mm256_permutevar8x32_ps(real_ret, _mm256_set_epi32(6, 7, 4, 5, 2, 3, 0, 1));
-    auto tmp1 = _mm256_permutevar8x32_ps(imag_ret, _mm256_set_epi32(6, 7, 4, 5, 2, 3, 0, 1));
-    real_ret = _mm256_blend_ps(real_ret, tmp1, 0b10101010);
-    imag_ret = _mm256_blend_ps(tmp0, imag_ret, 0b10101010);
-    real_ret = _mm256_permutevar8x32_ps(real_ret, _mm256_set_epi32(7, 5, 3, 1, 6, 4, 2, 0));
-    imag_ret = _mm256_permutevar8x32_ps(imag_ret, _mm256_set_epi32(7, 5, 3, 1, 6, 4, 2, 0));
-}
-
-static inline void _mm_store_twoarray_complex(m256_t<float>& real_ret, m256_t<float>& imag_ret,
-  float * cmplx_addr_0, float * cmplx_addr_1){
-    real_ret = _mm256_permutevar8x32_ps(real_ret, _mm256_set_epi32(7, 3, 6, 2, 5, 1, 4, 0));
-    imag_ret = _mm256_permutevar8x32_ps(imag_ret, _mm256_set_epi32(7, 3, 6, 2, 5, 1, 4, 0));
-    auto tmp0 = _mm256_permutevar8x32_ps(real_ret, _mm256_set_epi32(6, 7, 4, 5, 2, 3, 0, 1));
-    auto tmp1 = _mm256_permutevar8x32_ps(imag_ret, _mm256_set_epi32(6, 7, 4, 5, 2, 3, 0, 1));
-    real_ret = _mm256_blend_ps(real_ret, tmp1, 0b10101010);
-    imag_ret = _mm256_blend_ps(tmp0, imag_ret, 0b10101010);
-    _mm256_store(cmplx_addr_0, real_ret);
-    _mm256_store(cmplx_addr_1, imag_ret);
-}
-
-static inline void _mm_store_twoarray_complex(m256_t<double>& real_ret, m256_t<double>& imag_ret,
-  double * cmplx_addr_0, double * cmplx_addr_1){
-    real_ret = _mm256_permute4x64_pd(real_ret, 3 * 64 + 1 * 16 + 2 * 4 + 0 * 1);
-    imag_ret = _mm256_permute4x64_pd(imag_ret, 3 * 64 + 1 * 16 + 2 * 4 + 0 * 1);
-    auto tmp0 = _mm256_permute4x64_pd(real_ret, 2 * 64 + 3 * 16 + 0 * 4 + 1 * 1);
-    auto tmp1 = _mm256_permute4x64_pd(imag_ret, 2 * 64 + 3 * 16 + 0 * 4 + 1 * 1);
-    real_ret = _mm256_blend_pd(real_ret, tmp1, 0b1010);
-    imag_ret = _mm256_blend_pd(tmp0, imag_ret, 0b1010);
-    _mm256_store(cmplx_addr_0, real_ret);
-    _mm256_store(cmplx_addr_1, imag_ret);
-}
-
-template<size_t N, typename FloatType>
-inline void reorder(QV::areg_t<N>& qregs, QV::cvector_t<FloatType>& mat) {
-  if(qregs.size() < 2)
-    return;
-
-  auto dim = (1UL << N);
-  auto qreg_orig = qregs;
-  // TODO Haven't we already ordered?
-  std::sort(qregs.begin(), qregs.end());
-
-  size_t masks[N];
-
-  for(size_t i = 0; i < N; ++i)
-    for(size_t j = 0; j < N; ++j)
-      if(qreg_orig[i] == qregs[j])
-        masks[i] = 1U << j;
-
-  size_t indexes[1U << N];
-  for(size_t i = 0; i < dim; ++i) {
-    size_t index = 0U;
-    for(size_t j = 0; j < N; ++j) {
-      if(i & (1U << j))
-        index |= masks[j];
-    }
-    indexes[i] = index;
-  }
-
-  QV::cvector_t<FloatType> mat_orig;
-  mat_orig.reserve(mat.size());
-  std::copy(mat.begin(),mat.end(), std::back_inserter(mat_orig));
-
-  // TODO Using standard interface for transposing instead of memory indexing
-  for(size_t i = 0; i < dim; ++i) {
-    for(size_t j = 0; j < dim; ++j) {
-      size_t oldidx = i * dim + j;
-      size_t newidx = indexes[i] * dim + indexes[j];
-      reinterpret_cast<FloatType*>(mat.data())[newidx * 2] = reinterpret_cast<FloatType*>(mat_orig.data())[oldidx * 2];
-      reinterpret_cast<FloatType*>(mat.data())[newidx * 2 + 1] = reinterpret_cast<FloatType*>(mat_orig.data())[oldidx * 2 + 1];
-    }
-  }
-}
-
-template<size_t N, typename data_t>
-inline void _reorder(QV::areg_t<N>& qreg, data_t* fmat) {
-  auto dim = (1UL << N);
-  auto qreg_orig = qreg;
-  std::sort(qreg.begin(), qreg.end());
-
-  unsigned masks[N];
-
-  for (size_t i = 0; i < N; ++i)
-    for (size_t j = 0; j < N; ++j)
-      if (qreg_orig[i] == qreg[j])
-        masks[i] = 1U << j;
-
-  size_t indexes[1U << N];
-  for (size_t i = 0; i < dim; ++i) {
-    size_t index = 0U;
-    for (size_t j = 0; j < N; ++j) {
-      if (i & (1U << j))
-        index |= masks[j];
-    }
-    indexes[i] = index;
-  }
-
-  std::vector<data_t> fmat_org;
-  for (size_t i = 0; i < dim * dim * 2; ++i) {
-    fmat_org.push_back(fmat[i]);
-  }
-
-  for (unsigned i = 0; i < dim; ++i) {
-    for (unsigned j = 0; j < dim; ++j) {
-      unsigned oldidx = i * dim + j;
-      unsigned newidx = indexes[i] * dim + indexes[j];
-      fmat[newidx * 2] = fmat_org[oldidx * 2];
-      fmat[newidx * 2 + 1] = fmat_org[oldidx * 2 + 1];
-    }
-  }
-}
-
-template<size_t N>
-inline QV::areg_t<N> to_array(const QV::reg_t& vec) {
-  QV::areg_t<N> ret;
-  std::copy_n(vec.begin(), N, std::begin(ret));
-  return ret;
-}
-
-} // End anonymous namespace
-
 namespace QV {
 
-template<size_t N>
-inline void _apply_matrix_float_avx_q0q1q2(
-    RealVectorView<float>& reals,
-    ImaginaryVectorView<float>& imags,
-    const QV::cvector_t<float>& mat,
-    const areg_t<1ULL << N> &inds,
-    const areg_t<N> qregs
-){
+#define _mm_complex_multiply_pd(real_ret, imag_ret, real_left, imag_left, real_right, imag_right)\
+{\
+  real_ret = _mm256_mul_pd(real_left, real_right);\
+  imag_ret = _mm256_mul_pd(real_left, imag_right);\
+  real_ret = _mm256_fnmadd_pd(imag_left, imag_right, real_ret);\
+  imag_ret = _mm256_fmadd_pd(imag_left, real_right, imag_ret);\
+}
 
-  const std::array<__m256i, 7> _MASKS = {
-    _mm256_set_epi32(7, 6, 5, 4, 3, 2, 0, 1),
-    _mm256_set_epi32(7, 6, 5, 4, 3, 0, 1, 2),
-    _mm256_set_epi32(7, 6, 5, 4, 0, 2, 1, 3),
-    _mm256_set_epi32(7, 6, 5, 0, 3, 2, 1, 4),
-    _mm256_set_epi32(7, 6, 0, 4, 3, 2, 1, 5),
-    _mm256_set_epi32(7, 0, 5, 4, 3, 2, 1, 6),
-    _mm256_set_epi32(0, 6, 5, 4, 3, 2, 1, 7)
-  };
+#define _mm_complex_multiply_add_pd(real_ret, imag_ret, real_left, imag_left, real_right, imag_right)\
+{\
+  real_ret = _mm256_fmadd_pd(real_left, real_right, real_ret);\
+  imag_ret = _mm256_fmadd_pd(real_left, imag_right, imag_ret);\
+  real_ret = _mm256_fnmadd_pd(imag_left, imag_right, real_ret);\
+  imag_ret = _mm256_fmadd_pd(imag_left, real_right, imag_ret);\
+}
+
+#define _mm_complex_inner_product_pd(\
+    dim, vreals, vimags, cmplxs, vret_real, vret_imag, vtmp_0, vtmp_1)\
+{\
+  vtmp_0 = _mm256_set1_pd(cmplxs[0]);\
+  vtmp_1 = _mm256_set1_pd(cmplxs[1]);\
+  _mm_complex_multiply_pd(vret_real, vret_imag, vreals[0], vimags[0], vtmp_0, vtmp_1);\
+  for (unsigned ____i = 1; ____i < dim; ++____i) {\
+    vtmp_0 = _mm256_set1_pd(cmplxs[____i * 2]);\
+    vtmp_1 = _mm256_set1_pd(cmplxs[____i * 2 + 1]);\
+    _mm_complex_multiply_add_pd(vret_real, vret_imag, vreals[____i], vimags[____i], vtmp_0, vtmp_1);\
+  }\
+}
+
+#define _mm_complex_multiply_ps(real_ret, imag_ret, real_left, imag_left, real_right, imag_right)\
+{\
+  real_ret = _mm256_mul_ps(real_left, real_right);\
+  imag_ret = _mm256_mul_ps(real_left, imag_right);\
+  real_ret = _mm256_fnmadd_ps(imag_left, imag_right, real_ret);\
+  imag_ret = _mm256_fmadd_ps(imag_left, real_right, imag_ret);\
+}
+
+#define _mm_complex_multiply_add_ps(real_ret, imag_ret, real_left, imag_left, real_right, imag_right)\
+{\
+  real_ret = _mm256_fmadd_ps(real_left, real_right, real_ret);\
+  imag_ret = _mm256_fmadd_ps(real_left, imag_right, imag_ret);\
+  real_ret = _mm256_fnmadd_ps(imag_left, imag_right, real_ret);\
+  imag_ret = _mm256_fmadd_ps(imag_left, real_right, imag_ret);\
+}
+
+#define _mm_complex_inner_product_ps(\
+    dim, vreals, vimags, cmplxs, vret_real, vret_imag, vtmp_0, vtmp_1)\
+{\
+  vtmp_0 = _mm256_set1_ps(cmplxs[0]);\
+  vtmp_1 = _mm256_set1_ps(cmplxs[1]);\
+  _mm_complex_multiply_ps(vret_real, vret_imag, vreals[0], vimags[0], vtmp_0, vtmp_1);\
+  for (unsigned ____i = 1; ____i < dim; ++____i) {\
+    vtmp_0 = _mm256_set1_ps(cmplxs[____i * 2]);\
+    vtmp_1 = _mm256_set1_ps(cmplxs[____i * 2 + 1]);\
+    _mm_complex_multiply_add_ps(vret_real, vret_imag, vreals[____i], vimags[____i], vtmp_0, vtmp_1);\
+  }\
+}
+
+#define _mm_altload_complex_ps(cmplx_addr_0, cmplx_addr_1, real_ret, imag_ret)\
+{\
+  real_ret = _mm256_load_ps(cmplx_addr_0);\
+  imag_ret = _mm256_load_ps(cmplx_addr_1);\
+  tmp0 = _mm256_permutevar8x32_ps(real_ret, _mm256_set_epi32(6, 7, 4, 5, 2, 3, 0, 1));\
+  tmp1 = _mm256_permutevar8x32_ps(imag_ret, _mm256_set_epi32(6, 7, 4, 5, 2, 3, 0, 1));\
+  real_ret = _mm256_blend_ps(real_ret, tmp1, 0b10101010);\
+  imag_ret = _mm256_blend_ps(tmp0, imag_ret, 0b10101010);\
+  real_ret = _mm256_permutevar8x32_ps(real_ret, _mm256_set_epi32(7, 5, 3, 1, 6, 4, 2, 0));\
+  imag_ret = _mm256_permutevar8x32_ps(imag_ret, _mm256_set_epi32(7, 5, 3, 1, 6, 4, 2, 0));\
+}
+
+#define _mm_altstore_complex_ps(real_ret, imag_ret, cmplx_addr_0, cmplx_addr_1)\
+{\
+  real_ret = _mm256_permutevar8x32_ps(real_ret, _mm256_set_epi32(7, 3, 6, 2, 5, 1, 4, 0));\
+  imag_ret = _mm256_permutevar8x32_ps(imag_ret, _mm256_set_epi32(7, 3, 6, 2, 5, 1, 4, 0));\
+  tmp0 = _mm256_permutevar8x32_ps(real_ret, _mm256_set_epi32(6, 7, 4, 5, 2, 3, 0, 1));\
+  tmp1 = _mm256_permutevar8x32_ps(imag_ret, _mm256_set_epi32(6, 7, 4, 5, 2, 3, 0, 1));\
+  real_ret = _mm256_blend_ps(real_ret, tmp1, 0b10101010);\
+  imag_ret = _mm256_blend_ps(tmp0, imag_ret, 0b10101010);\
+  _mm256_store_ps(cmplx_addr_0, real_ret);\
+  _mm256_store_ps(cmplx_addr_1, imag_ret);\
+}
+
+#define _mm_altload_complex_pd(cmplx_addr_0, cmplx_addr_1, real_ret, imag_ret)\
+{\
+  real_ret = _mm256_load_pd(cmplx_addr_0);\
+  imag_ret = _mm256_load_pd(cmplx_addr_1);\
+  tmp0 = _mm256_permute4x64_pd(real_ret, 2 * 64 + 3 * 16 + 0 * 4 + 1 * 1);\
+  tmp1 = _mm256_permute4x64_pd(imag_ret, 2 * 64 + 3 * 16 + 0 * 4 + 1 * 1);\
+  real_ret = _mm256_blend_pd(real_ret, tmp1, 0b1010);\
+  imag_ret = _mm256_blend_pd(tmp0, imag_ret, 0b1010);\
+  real_ret = _mm256_permute4x64_pd(real_ret, 3 * 64 + 1 * 16 + 2 * 4 + 0 * 1);\
+  imag_ret = _mm256_permute4x64_pd(imag_ret, 3 * 64 + 1 * 16 + 2 * 4 + 0 * 1);\
+}
+
+#define _mm_altstore_complex_pd(real_ret, imag_ret, cmplx_addr_0, cmplx_addr_1)\
+{\
+  real_ret = _mm256_permute4x64_pd(real_ret, 3 * 64 + 1 * 16 + 2 * 4 + 0 * 1);\
+  imag_ret = _mm256_permute4x64_pd(imag_ret, 3 * 64 + 1 * 16 + 2 * 4 + 0 * 1);\
+  tmp0 = _mm256_permute4x64_pd(real_ret, 2 * 64 + 3 * 16 + 0 * 4 + 1 * 1);\
+  tmp1 = _mm256_permute4x64_pd(imag_ret, 2 * 64 + 3 * 16 + 0 * 4 + 1 * 1);\
+  real_ret = _mm256_blend_pd(real_ret, tmp1, 0b1010);\
+  imag_ret = _mm256_blend_pd(tmp0, imag_ret, 0b1010);\
+  _mm256_store_pd(cmplx_addr_0, real_ret);\
+  _mm256_store_pd(cmplx_addr_1, imag_ret);\
+}
+
+#define perm_d_q0q1_0   3 * 64 + 2 * 16 + 0 * 4 + 1 * 1
+#define perm_d_q0q1_1   3 * 64 + 0 * 16 + 1 * 4 + 2 * 1
+#define perm_d_q0q1_2   0 * 64 + 2 * 16 + 1 * 4 + 3 * 1
+#define perm_d_q0       2 * 64 + 3 * 16 + 0 * 4 + 1 * 1
+#define perm_d_q1       1 * 64 + 0 * 16 + 3 * 4 + 2 * 1
+
+template<size_t N>
+inline void _fill_indices(uint64_t ind0, uint64_t* inds, const uint64_t ids_size, const uint64_t* qregs) {
+  for (unsigned i = 0; i < ids_size; ++i)
+    inds[i] = ind0;
+  for (unsigned n = 0; n < N; ++n)
+    for (unsigned i = 0; i < ids_size; i += (1 << (n + 1)))
+      for (unsigned j = 0; j < (1U << n); ++j)
+        inds[i + j + (1U << n)] += (1ULL << qregs[n]);
+}
+
+
+template<size_t N>
+inline void _apply_matrix_float_avx_q0q1q2(  //
+    void* data, //
+    void* mat, //
+    const uint64_t* qregs, // sorted
+    const uint64_t ind0 //
+    ) {
+
+  auto ids_size = (1ULL << N);
+  uint64_t* inds = (uint64_t*) malloc (sizeof(uint64_t) * (ids_size));
+  _fill_indices<N>(ind0, inds, ids_size, qregs);
+
+  __m256i masks[7];
   __m256 real_ret, imag_ret, real_ret1, imag_ret1;
   __m256 vreals[1ULL << N], vimags[1ULL << N];
   __m256 tmp0, tmp1;
 
-  const float * fmat = reinterpret_cast<const float *>(mat.data());
+  float* fdata = (float*) data;
+  float* fmat = (float*) mat;
 
+  masks[0] = _mm256_set_epi32(7, 6, 5, 4, 3, 2, 0, 1);
+  masks[1] = _mm256_set_epi32(7, 6, 5, 4, 3, 0, 1, 2);
+  masks[2] = _mm256_set_epi32(7, 6, 5, 4, 0, 2, 1, 3);
+  masks[3] = _mm256_set_epi32(7, 6, 5, 0, 3, 2, 1, 4);
+  masks[4] = _mm256_set_epi32(7, 6, 0, 4, 3, 2, 1, 5);
+  masks[5] = _mm256_set_epi32(7, 0, 5, 4, 3, 2, 1, 6);
+  masks[6] = _mm256_set_epi32(0, 6, 5, 4, 3, 2, 1, 7);
 
-  for(unsigned i = 0; i < (1ULL << N); i += 8){
+  for (unsigned i = 0; i < ids_size; i += 8) {
     auto idx = inds[i];
-    _mm_load_twoarray_complex(reals[idx], imags[idx], vreals[i], vimags[i]);
+    _mm_altload_complex_ps(&fdata[idx * 2], &fdata[idx * 2 + 8], vreals[i], vimags[i]);
 
     for (unsigned j = 1; j < 8; ++j) {
-      vreals[i + j] = _mm256_permutevar8x32_ps(vreals[i], _MASKS[j - 1]);
-      vimags[i + j] = _mm256_permutevar8x32_ps(vimags[i], _MASKS[j - 1]);
+      vreals[i + j] = _mm256_permutevar8x32_ps(vreals[i], masks[j - 1]);
+      vimags[i + j] = _mm256_permutevar8x32_ps(vimags[i], masks[j - 1]);
     }
   }
 
   unsigned midx = 0;
-  for(unsigned i = 0; i < inds.size(); i += 8){
+  for (unsigned i = 0; i < ids_size; i += 8) {
     auto idx = inds[i];
-    _mm_complex_inner_product<float>((1ULL << N), vreals, vimags, (&fmat[midx]), real_ret, imag_ret, tmp0, tmp1);
+    _mm_complex_inner_product_ps((1ULL << N), vreals, vimags, (&fmat[midx]), real_ret, imag_ret, tmp0, tmp1);
     midx += (1ULL << (N + 1));
 
-    for(size_t j = 1; j < 8; ++j){
-      _mm_complex_inner_product<float>((1ULL << N), vreals, vimags, (&fmat[midx]), real_ret1, imag_ret1, tmp0, tmp1);
+    for (unsigned j = 1; j < 8; ++j) {
+      _mm_complex_inner_product_ps((1ULL << N), vreals, vimags, (&fmat[midx]), real_ret1, imag_ret1, tmp0, tmp1);
       midx += (1ULL << (N + 1));
 
-      real_ret1 = _mm256_permutevar8x32_ps(real_ret1, _MASKS[j - 1]);
-      imag_ret1 = _mm256_permutevar8x32_ps(imag_ret1, _MASKS[j - 1]);
+      real_ret1 = _mm256_permutevar8x32_ps(real_ret1, masks[j - 1]);
+      imag_ret1 = _mm256_permutevar8x32_ps(imag_ret1, masks[j - 1]);
 
       switch (j) {
       case 1:
@@ -408,25 +251,29 @@ inline void _apply_matrix_float_avx_q0q1q2(
         break;
       }
     }
-    _mm_store_twoarray_complex(real_ret, imag_ret, reals[idx], imags[idx]);
+
+    _mm_altstore_complex_ps(real_ret, imag_ret, &fdata[idx * 2], &fdata[idx * 2 + 8]);
   }
+
+  free (inds);
 }
 
 template<size_t N>
-inline void _apply_matrix_float_avx_qLqL(
-    RealVectorView<float>& reals,
-    ImaginaryVectorView<float>& imags,
-    const QV::cvector_t<float>& mat,
-    const areg_t<1ULL << N> &inds,
-    const areg_t<N> qregs
-){
+inline void _apply_matrix_float_avx_qLqL( //
+    void* data, //
+    void* mat, //
+    const uint64_t* qregs, // sorted
+    const uint64_t ind0 //
+    ) {
+
+  auto ids_size = (1ULL << N);
+  uint64_t* inds = (uint64_t*) malloc (sizeof(uint64_t) * (ids_size));
+  _fill_indices<N>(ind0, inds, ids_size, qregs);
 
   __m256i masks[3];
   __m256 real_ret, imag_ret, real_ret1, imag_ret1;
   __m256 vreals[1ULL << N], vimags[1ULL << N];
   __m256 tmp0, tmp1;
-
-   const float * fmat = reinterpret_cast<const float *>(mat.data());
 
   if (qregs[1] == 1) {
     masks[0] = _mm256_set_epi32(7, 6, 4, 5, 3, 2, 0, 1);
@@ -442,24 +289,26 @@ inline void _apply_matrix_float_avx_qLqL(
     masks[2] = _mm256_set_epi32(1, 0, 5, 4, 3, 2, 7, 6);
   }
 
-  for (size_t i = 0; i < (1ULL << N); i += 4) {
-    auto idx = inds[i];
-    _mm_load_twoarray_complex(reals[idx], imags[idx], vreals[i], vimags[i]);
+  float* fdata = (float*) data;
+  float* fmat = (float*) mat;
 
-    for (size_t j = 0; j < 3; ++j) {
+  for (unsigned i = 0; i < (1ULL << N); i += 4) {
+    auto idx = inds[i];
+    _mm_altload_complex_ps(&fdata[idx * 2], &fdata[idx * 2 + 8], vreals[i], vimags[i]);
+    for (unsigned j = 0; j < 3; ++j) {
       vreals[i + j + 1] = _mm256_permutevar8x32_ps(vreals[i], masks[j]);
       vimags[i + j + 1] = _mm256_permutevar8x32_ps(vimags[i], masks[j]);
     }
   }
 
-  size_t midx = 0;
-  for (size_t i = 0; i < (1ULL << N); i += 4) {
+  unsigned midx = 0;
+  for (unsigned i = 0; i < (1ULL << N); i += 4) {
     auto idx = inds[i];
-    _mm_complex_inner_product<float>((1ULL << N), vreals, vimags, (&fmat[midx]), real_ret, imag_ret, tmp0, tmp1);
+    _mm_complex_inner_product_ps((1ULL << N), vreals, vimags, (&fmat[midx]), real_ret, imag_ret, tmp0, tmp1);
     midx += (1ULL << (N + 1));
 
-    for (unsigned j = 0; j < 3; ++j){
-      _mm_complex_inner_product<float>((1ULL << N), vreals, vimags, (&fmat[midx]), real_ret1, imag_ret1, tmp0, tmp1);
+    for (unsigned j = 0; j < 3; ++j) {
+      _mm_complex_inner_product_ps((1ULL << N), vreals, vimags, (&fmat[midx]), real_ret1, imag_ret1, tmp0, tmp1);
       midx += (1ULL << (N + 1));
 
       real_ret1 = _mm256_permutevar8x32_ps(real_ret1, masks[j]);
@@ -492,25 +341,28 @@ inline void _apply_matrix_float_avx_qLqL(
         break;
       }
     }
-    _mm_store_twoarray_complex(real_ret, imag_ret, reals[idx], imags[idx]);
+    _mm_altstore_complex_ps(real_ret, imag_ret, &fdata[idx * 2], &fdata[idx * 2 + 8]);
   }
+
+  free(inds);
 }
 
 template<size_t N>
-inline void _apply_matrix_float_avx_qL(
-    RealVectorView<float>& reals,
-    ImaginaryVectorView<float>& imags,
-    const QV::cvector_t<float>& mat,
-    const areg_t<1ULL << N>& inds,
-    const areg_t<N>& qregs
-){
+inline void _apply_matrix_float_avx_qL( //
+    void* data, //
+    void* mat, //
+    const uint64_t* qregs, // sorted
+    const uint64_t ind0 //
+    ) {
+
+  auto ids_size = (1ULL << N);
+  uint64_t* inds = (uint64_t*) malloc (sizeof(uint64_t) * (ids_size));
+  _fill_indices<N>(ind0, inds, ids_size, qregs);
 
   __m256i mask;
   __m256 real_ret, imag_ret, real_ret1, imag_ret1;
   __m256 vreals[1ULL << N], vimags[1ULL << N];
   __m256 tmp0, tmp1;
-
-  const float * fmat = reinterpret_cast<const float *>(mat.data());
 
   if (qregs[0] == 0) {
     mask = _mm256_set_epi32(6, 7, 4, 5, 2, 3, 0, 1);
@@ -520,10 +372,12 @@ inline void _apply_matrix_float_avx_qL(
     mask = _mm256_set_epi32(3, 2, 1, 0, 7, 6, 5, 4);
   }
 
-  for (unsigned i = 0; i < (1ULL << N); i += 2){
-    auto idx = inds[i];
-    _mm_load_twoarray_complex(reals[idx], imags[idx], vreals[i], vimags[i]);
+  float* fdata = (float*) data;
+  float* fmat = (float*) mat;
 
+  for (unsigned i = 0; i < (1ULL << N); i += 2) {
+    auto idx = inds[i];
+    _mm_altload_complex_ps(&fdata[idx * 2], &fdata[idx * 2 + 8], vreals[i], vimags[i]);
     vreals[i + 1] = _mm256_permutevar8x32_ps(vreals[i], mask);
     vimags[i + 1] = _mm256_permutevar8x32_ps(vimags[i], mask);
   }
@@ -531,10 +385,10 @@ inline void _apply_matrix_float_avx_qL(
   unsigned midx = 0;
   for (unsigned i = 0; i < (1ULL << N); i += 2) {
     auto idx = inds[i];
-    _mm_complex_inner_product<float>((1ULL << N), vreals, vimags, (&fmat[midx]), real_ret, imag_ret, tmp0, tmp1);
+    _mm_complex_inner_product_ps((1ULL << N), vreals, vimags, (&fmat[midx]), real_ret, imag_ret, tmp0, tmp1);
     midx += (1ULL << (N + 1));
 
-    _mm_complex_inner_product<float>((1ULL << N), vreals, vimags, (&fmat[midx]), real_ret1, imag_ret1, tmp0, tmp1);
+    _mm_complex_inner_product_ps((1ULL << N), vreals, vimags, (&fmat[midx]), real_ret1, imag_ret1, tmp0, tmp1);
     midx += (1ULL << (N + 1));
 
     real_ret1 = _mm256_permutevar8x32_ps(real_ret1, mask);
@@ -547,385 +401,506 @@ inline void _apply_matrix_float_avx_qL(
                (qregs[0] == 1) ? _mm256_blend_ps(imag_ret, imag_ret1, 0b11001100) : // (1,H,H)
                                  _mm256_blend_ps(imag_ret, imag_ret1, 0b11110000); //  (2,H,H)
 
-    _mm_store_twoarray_complex(real_ret, imag_ret, reals[idx], imags[idx]);
+    _mm_altstore_complex_ps(real_ret, imag_ret, &fdata[idx * 2], &fdata[idx * 2 + 8]);
   }
+
+  free(inds);
 }
 
 template<size_t N>
-inline void _apply_matrix_float_avx(
-    RealVectorView<float>& reals,
-    ImaginaryVectorView<float>& imags,
-    const QV::cvector_t<float>& mat,
-    const areg_t<1ULL << N>& inds,
-    const areg_t<N>& qregs
-){
+inline void _apply_matrix_float_avx( //
+    void* data, //
+    void* mat, //
+    const uint64_t* qregs, // sorted
+    const uint64_t ind0 //
+    ) {
+
+  auto ids_size = (1ULL << N);
+  uint64_t* inds = (uint64_t*) malloc (sizeof(uint64_t) * (ids_size));
+  _fill_indices<N>(ind0, inds, ids_size, qregs);
 
   __m256 real_ret, imag_ret;
   __m256 vreals[1ULL << N], vimags[1ULL << N];
   __m256 tmp0, tmp1;
 
-  const float * fmat = reinterpret_cast<const float *>(mat.data());
+  float* fdata = (float*) data;
+  float* fmat = (float*) mat;
 
-  for(unsigned i = 0; i < (1ULL << N); ++i){
+  for (unsigned i = 0; i < (1ULL << N); ++i) {
     auto idx = inds[i];
-    _mm_load_twoarray_complex(reals[idx], imags[idx], vreals[i], vimags[i]);
+    _mm_altload_complex_ps(&fdata[idx * 2], &fdata[idx * 2 + 8], vreals[i], vimags[i]);
   }
 
   unsigned midx = 0;
-  for(unsigned i = 0; i < (1ULL << N); ++i){
+  for (unsigned i = 0; i < (1ULL << N); ++i) {
     auto idx = inds[i];
-    _mm_complex_inner_product<float>((1ULL << N), vreals, vimags, (&fmat[midx]), real_ret, imag_ret, tmp0, tmp1);
+    _mm_complex_inner_product_ps((1ULL << N), vreals, vimags, (&fmat[midx]), real_ret, imag_ret, tmp0, tmp1);
     midx += (1ULL << (N + 1));
-    _mm_store_twoarray_complex(real_ret, imag_ret, reals[idx], imags[idx]);
+    _mm_altstore_complex_ps(real_ret, imag_ret, &fdata[idx * 2], &fdata[idx * 2 + 8]);
   }
+
+  free(inds);
 }
 
 template<size_t N>
-inline void _apply_matrix_double_avx_q0q1(
-    RealVectorView<double>& reals,
-    ImaginaryVectorView<double>& imags,
-    const QV::cvector_t<double>& mat,
-    const areg_t<1ULL << N> &inds,
-    const areg_t<N>& qregs
-){
+inline void _apply_matrix_double_avx_q0q1( //
+    void* data, //
+    void* mat, //
+    const uint64_t* qregs, // sorted
+    const uint64_t ind0 //
+    ) {
 
-  const int PERM_D_Q0Q1_0 = 3 * 64 + 2 * 16 + 0 * 4 + 1 * 1;
-  const int PERM_D_Q0Q1_1 = 3 * 64 + 0 * 16 + 1 * 4 + 2 * 1;
-  const int PERM_D_Q0Q1_2 = 0 * 64 + 2 * 16 + 1 * 4 + 3 * 1;
-
+  auto ids_size = (1ULL << N);
+  uint64_t* inds = (uint64_t*) malloc (sizeof(uint64_t) * (ids_size));
+  _fill_indices<N>(ind0, inds, ids_size, qregs);
 
   __m256d real_ret, imag_ret, real_ret1, imag_ret1;
   __m256d vreals[1ULL << N], vimags[1ULL << N];
   __m256d tmp0, tmp1;
 
-  const double * dmat = reinterpret_cast<const double *>(mat.data());
+  double* ddata = (double*) data;
+  double* dmat = (double*) mat;
 
-  for(size_t i = 0; i < (1ULL << N); i += 4) {
+  for (unsigned i = 0; i < ids_size; i += 4) {
     auto idx = inds[i];
-    _mm_load_twoarray_complex(reals[idx], imags[idx], vreals[i], vimags[i]);
-    for (size_t j = 1; j < 4; ++j) {
+    _mm_altload_complex_pd(&ddata[idx * 2], &ddata[idx * 2 + 4], vreals[i], vimags[i]);
+    for (unsigned j = 1; j < 4; ++j) {
       switch (j) {
       case 1:
-        vreals[i + j] = _mm256_permute4x64_pd(vreals[i], PERM_D_Q0Q1_0);
-        vimags[i + j] = _mm256_permute4x64_pd(vimags[i], PERM_D_Q0Q1_0);
+        vreals[i + j] = _mm256_permute4x64_pd(vreals[i], perm_d_q0q1_0);
+        vimags[i + j] = _mm256_permute4x64_pd(vimags[i], perm_d_q0q1_0);
         break;
       case 2:
-        vreals[i + j] = _mm256_permute4x64_pd(vreals[i], PERM_D_Q0Q1_1);
-        vimags[i + j] = _mm256_permute4x64_pd(vimags[i], PERM_D_Q0Q1_1);
+        vreals[i + j] = _mm256_permute4x64_pd(vreals[i], perm_d_q0q1_1);
+        vimags[i + j] = _mm256_permute4x64_pd(vimags[i], perm_d_q0q1_1);
         break;
       case 3:
-        vreals[i + j] = _mm256_permute4x64_pd(vreals[i], PERM_D_Q0Q1_2);
-        vimags[i + j] = _mm256_permute4x64_pd(vimags[i], PERM_D_Q0Q1_2);
+        vreals[i + j] = _mm256_permute4x64_pd(vreals[i], perm_d_q0q1_2);
+        vimags[i + j] = _mm256_permute4x64_pd(vimags[i], perm_d_q0q1_2);
         break;
       }
     }
   }
 
-  size_t midx = 0;
-  for (size_t i = 0; i < (1ULL << N); i += 4) {
+  unsigned midx = 0;
+  for (unsigned i = 0; i < ids_size; i += 4) {
     auto idx = inds[i];
-    _mm_complex_inner_product<double>((1ULL << N), vreals, vimags, (&dmat[midx]), real_ret, imag_ret, tmp0, tmp1);
+    _mm_complex_inner_product_pd((1ULL << N), vreals, vimags, (&dmat[midx]), real_ret, imag_ret, tmp0, tmp1);
     midx += (1ULL << (N + 1));
-    for (size_t j = 1; j < 4; ++j) {
-      _mm_complex_inner_product<double>((1ULL << N), vreals, vimags, (&dmat[midx]), real_ret1, imag_ret1, tmp0, tmp1);
+    for (unsigned j = 1; j < 4; ++j) {
+      _mm_complex_inner_product_pd((1ULL << N), vreals, vimags, (&dmat[midx]), real_ret1, imag_ret1, tmp0, tmp1);
       midx += (1ULL << (N + 1));
-      switch(j){
-        case 1:
-          real_ret1 = _mm256_permute4x64_pd(real_ret1, PERM_D_Q0Q1_0);
-          imag_ret1 = _mm256_permute4x64_pd(imag_ret1, PERM_D_Q0Q1_0);
-          real_ret = _mm256_blend_pd(real_ret, real_ret1, 0b0010);
-          imag_ret = _mm256_blend_pd(imag_ret, imag_ret1, 0b0010);
-          break;
-        case 2:
-          real_ret1 = _mm256_permute4x64_pd(real_ret1, PERM_D_Q0Q1_1);
-          imag_ret1 = _mm256_permute4x64_pd(imag_ret1, PERM_D_Q0Q1_1);
-          real_ret = _mm256_blend_pd(real_ret, real_ret1, 0b0100);
-          imag_ret = _mm256_blend_pd(imag_ret, imag_ret1, 0b0100);
-          break;
-        case 3:
-          real_ret1 = _mm256_permute4x64_pd(real_ret1, PERM_D_Q0Q1_2);
-          imag_ret1 = _mm256_permute4x64_pd(imag_ret1, PERM_D_Q0Q1_2);
-          real_ret = _mm256_blend_pd(real_ret, real_ret1, 0b1000);
-          imag_ret = _mm256_blend_pd(imag_ret, imag_ret1, 0b1000);
-          break;
+      switch (j) {
+      case 1:
+        real_ret1 = _mm256_permute4x64_pd(real_ret1, perm_d_q0q1_0);
+        imag_ret1 = _mm256_permute4x64_pd(imag_ret1, perm_d_q0q1_0);
+        real_ret = _mm256_blend_pd(real_ret, real_ret1, 0b0010);
+        imag_ret = _mm256_blend_pd(imag_ret, imag_ret1, 0b0010);
+        break;
+      case 2:
+        real_ret1 = _mm256_permute4x64_pd(real_ret1, perm_d_q0q1_1);
+        imag_ret1 = _mm256_permute4x64_pd(imag_ret1, perm_d_q0q1_1);
+        real_ret = _mm256_blend_pd(real_ret, real_ret1, 0b0100);
+        imag_ret = _mm256_blend_pd(imag_ret, imag_ret1, 0b0100);
+        break;
+      case 3:
+        real_ret1 = _mm256_permute4x64_pd(real_ret1, perm_d_q0q1_2);
+        imag_ret1 = _mm256_permute4x64_pd(imag_ret1, perm_d_q0q1_2);
+        real_ret = _mm256_blend_pd(real_ret, real_ret1, 0b1000);
+        imag_ret = _mm256_blend_pd(imag_ret, imag_ret1, 0b1000);
+        break;
       }
     }
-    _mm_store_twoarray_complex(real_ret, imag_ret, reals[idx], imags[idx]);
+    _mm_altstore_complex_pd(real_ret, imag_ret, &ddata[idx * 2], &ddata[idx * 2 + 4]);
   }
+  free(inds);
 }
 
 template<size_t N>
-inline void _apply_matrix_double_avx_qL(
-    RealVectorView<double>& reals,
-    ImaginaryVectorView<double>& imags,
-    const QV::cvector_t<double>& mat,
-    const areg_t<1ULL << N> &inds,
-    const areg_t<N>& qregs
-){
+inline void _apply_matrix_double_avx_qL( //
+    void* data, //
+    void* mat, //
+    const uint64_t* qregs, // sorted
+    const uint64_t ind0 //
+    ) {
 
-  const int PERM_D_Q0 = 2 * 64 + 3 * 16 + 0 * 4 + 1 * 1;
-  const int PERM_D_Q1 = 1 * 64 + 0 * 16 + 3 * 4 + 2 * 1;
+  auto ids_size = (1ULL << N);
+  uint64_t* inds = (uint64_t*) malloc (sizeof(uint64_t) * (ids_size));
+  _fill_indices<N>(ind0, inds, ids_size, qregs);
 
   __m256d real_ret, imag_ret, real_ret1, imag_ret1;
   __m256d vreals[1ULL << N], vimags[1ULL << N];
   __m256d tmp0, tmp1;
 
-  const double * dmat = reinterpret_cast<const double *>(mat.data());
+  double* ddata = (double*) data;
+  double* dmat = (double*) mat;
 
-  for(unsigned i = 0; i < (1ULL << N); i += 2){
+  for (unsigned i = 0; i < ids_size; i += 2) {
     auto idx = inds[i];
-    _mm_load_twoarray_complex(reals[idx], imags[idx], vreals[i], vimags[i]);
+    _mm_altload_complex_pd(&ddata[idx * 2], &ddata[idx * 2 + 4], vreals[i], vimags[i]);
     if (qregs[0] == 0) {
-      vreals[i + 1] = _mm256_permute4x64_pd(vreals[i], PERM_D_Q0);
-      vimags[i + 1] = _mm256_permute4x64_pd(vimags[i], PERM_D_Q0);
+      vreals[i + 1] = _mm256_permute4x64_pd(vreals[i], perm_d_q0);
+      vimags[i + 1] = _mm256_permute4x64_pd(vimags[i], perm_d_q0);
     } else {
-      vreals[i + 1] = _mm256_permute4x64_pd(vreals[i], PERM_D_Q1);
-      vimags[i + 1] = _mm256_permute4x64_pd(vimags[i], PERM_D_Q1);
+      vreals[i + 1] = _mm256_permute4x64_pd(vreals[i], perm_d_q1);
+      vimags[i + 1] = _mm256_permute4x64_pd(vimags[i], perm_d_q1);
     }
   }
 
-  size_t midx = 0;
-  for(size_t i = 0; i < (1ULL << N); i += 2){
+  unsigned midx = 0;
+  for (unsigned i = 0; i < ids_size; i += 2) {
     auto idx = inds[i];
-    _mm_complex_inner_product<double>((1ULL << N), vreals, vimags, (&dmat[midx]), real_ret, imag_ret, tmp0, tmp1);
+    _mm_complex_inner_product_pd(ids_size, vreals, vimags, (&dmat[midx]), real_ret, imag_ret, tmp0, tmp1);
     midx += (1ULL << (N + 1));
 
-    _mm_complex_inner_product<double>((1ULL << N), vreals, vimags, (&dmat[midx]), real_ret1, imag_ret1, tmp0, tmp1);
+    _mm_complex_inner_product_pd(ids_size, vreals, vimags, (&dmat[midx]), real_ret1, imag_ret1, tmp0, tmp1);
     midx += (1ULL << (N + 1));
 
     if (qregs[0] == 0) {
-      real_ret1 = _mm256_permute4x64_pd(real_ret1, PERM_D_Q0);
-      imag_ret1 = _mm256_permute4x64_pd(imag_ret1, PERM_D_Q0);
+      real_ret1 = _mm256_permute4x64_pd(real_ret1, perm_d_q0);
+      imag_ret1 = _mm256_permute4x64_pd(imag_ret1, perm_d_q0);
       real_ret = _mm256_blend_pd(real_ret, real_ret1, 0b1010);
       imag_ret = _mm256_blend_pd(imag_ret, imag_ret1, 0b1010);
     } else {
-      real_ret1 = _mm256_permute4x64_pd(real_ret1, PERM_D_Q1);
-      imag_ret1 = _mm256_permute4x64_pd(imag_ret1, PERM_D_Q1);
+      real_ret1 = _mm256_permute4x64_pd(real_ret1, perm_d_q1);
+      imag_ret1 = _mm256_permute4x64_pd(imag_ret1, perm_d_q1);
       real_ret = _mm256_blend_pd(real_ret, real_ret1, 0b1100);
       imag_ret = _mm256_blend_pd(imag_ret, imag_ret1, 0b1100);
     }
-    _mm_store_twoarray_complex(real_ret, imag_ret, reals[idx], imags[idx]);
+
+    _mm_altstore_complex_pd(real_ret, imag_ret, &ddata[idx * 2], &ddata[idx * 2 + 4]);
   }
+  free(inds);
 }
 
 template<size_t N>
-inline void _apply_matrix_double_avx(
-    RealVectorView<double>& reals,
-    ImaginaryVectorView<double>& imags,
-    const QV::cvector_t<double>& mat,
-    const areg_t<1ULL << N> &inds,
-    const areg_t<N> qregs
-){
+inline void _apply_matrix_double_avx( //
+    void* data, //
+    void* mat, //
+    const uint64_t* qregs, // sorted
+    const uint64_t ind0 //
+    ) {
+
+  auto ids_size = (1ULL << N);
+  uint64_t* inds = (uint64_t*) malloc (sizeof(uint64_t) * (ids_size));
+  _fill_indices<N>(ind0, inds, ids_size, qregs);
 
   __m256d real_ret, imag_ret;
   __m256d vreals[1ULL << N], vimags[1ULL << N];
   __m256d tmp0, tmp1;
 
-  const double * dmat = reinterpret_cast<const double *>(mat.data());
+  double* ddata = (double*) data;
+  double* dmat = (double*) mat;
 
-  for(unsigned i = 0; i < (1ULL << N); ++i){
+  for (unsigned i = 0; i < ids_size; ++i) {
     auto idx = inds[i];
-    _mm_load_twoarray_complex(reals[idx], imags[idx], vreals[i], vimags[i]);
+    _mm_altload_complex_pd(&ddata[idx * 2], &ddata[idx * 2 + 4], vreals[i], vimags[i]);
   }
 
   unsigned midx = 0;
-  for(unsigned i = 0; i < (1ULL << N); ++i){
+  for (unsigned i = 0; i < ids_size; ++i) {
     auto idx = inds[i];
-    _mm_complex_inner_product<double>((1ULL << N), vreals, vimags, (&dmat[midx]), real_ret, imag_ret, tmp0, tmp1);
+    _mm_complex_inner_product_pd(ids_size, vreals, vimags, (&dmat[midx]), real_ret, imag_ret, tmp0, tmp1);
     midx += (1ULL << (N + 1));
-    _mm_store_twoarray_complex(real_ret, imag_ret, reals[idx], imags[idx]);
+    _mm_altstore_complex_pd(real_ret, imag_ret, &ddata[idx * 2], &ddata[idx * 2 + 4]);
   }
+
+  free(inds);
 }
 
-enum class Avx {
-  NotApplied,
-  Applied
-};
+const std::array<uint64_t, 64> _MASKS{{  //
+    0ULL, 1ULL, 3ULL, 7ULL,  //
+        15ULL, 31ULL, 63ULL, 127ULL,  //
+        255ULL, 511ULL, 1023ULL, 2047ULL,  //
+        4095ULL, 8191ULL, 16383ULL, 32767ULL,  //
+        65535ULL, 131071ULL, 262143ULL, 524287ULL,  //
+        1048575ULL, 2097151ULL, 4194303ULL, 8388607ULL,  //
+        16777215ULL, 33554431ULL, 67108863ULL, 134217727ULL,  //
+        268435455ULL, 536870911ULL, 1073741823ULL, 2147483647ULL,  //
+        4294967295ULL, 8589934591ULL, 17179869183ULL, 34359738367ULL,  //
+        68719476735ULL, 137438953471ULL, 274877906943ULL, 549755813887ULL,  //
+        1099511627775ULL, 2199023255551ULL, 4398046511103ULL, 8796093022207ULL,  //
+        17592186044415ULL, 35184372088831ULL, 70368744177663ULL, 140737488355327ULL,  //
+        281474976710655ULL, 562949953421311ULL, 1125899906842623ULL, 2251799813685247ULL,  //
+        4503599627370495ULL, 9007199254740991ULL, 18014398509481983ULL, 36028797018963967ULL,  //
+        72057594037927935ULL, 144115188075855871ULL, 288230376151711743ULL, 576460752303423487ULL,  //
+        1152921504606846975ULL, 2305843009213693951ULL, 4611686018427387903ULL, 9223372036854775807ULL  //
+    }};
 
 template<size_t N>
-inline Avx _apply_avx_kernel(
-  const areg_t<N>& qregs,
-  std::complex<float>* data,
-  uint64_t data_size,
-  const QV::cvector_t<float>& mat,
-  uint_t omp_threads
-){
-
-  RealVectorView<float> real = {data};
-  ImaginaryVectorView<float> img = {data};
-
-  if(qregs.size() > 2 && qregs[2] == 2){
-    auto lambda = [&](const areg_t<(1 << N)> &inds, const QV::cvector_t<float>& fmat)->void {
-      _apply_matrix_float_avx_q0q1q2(real, img, fmat, inds, qregs);
-    };
-
-    QV::apply_lambda(0, data_size, 1, omp_threads, lambda, qregs, mat);
-
-  }else if (qregs.size() > 1 && qregs[1] < 3){
-    auto lambda = [&](const areg_t<(1 << N)> &inds, const QV::cvector_t<float>& fmat)->void {
-      _apply_matrix_float_avx_qLqL(real, img, fmat, inds, qregs);
-    };
-
-    QV::apply_lambda(0, data_size, 2, omp_threads, lambda, qregs, mat);
-
-  }else if (qregs[0] < 3){
-    auto lambda = [&](const areg_t<(1 << N)> &inds, const QV::cvector_t<float>& fmat)->void {
-      _apply_matrix_float_avx_qL(real, img, fmat, inds, qregs);
-    };
-
-    QV::apply_lambda(0, data_size, 4, omp_threads, lambda, qregs, mat);
-
-  }else{
-    auto lambda = [&](const areg_t<(1 << N)> &inds, const QV::cvector_t<float>& fmat)->void {
-      _apply_matrix_float_avx(real, img, fmat, inds, qregs);
-    };
-
-    QV::apply_lambda(0, data_size, 8, omp_threads, lambda, qregs, mat);
-
+inline uint64_t index0(  //
+    const uint64_t* qubits, // sorted
+    const uint64_t k) {
+  uint64_t lowbits, retval = k;
+  for (size_t j = 0; j < N; j++) {
+    lowbits = retval & _MASKS[qubits[j]];
+    retval >>= qubits[j];
+    retval <<= qubits[j] + 1;
+    retval |= lowbits;
   }
-  return Avx::Applied;
+  return retval;
+}
+
+template<size_t N, typename Lambda, typename param_t>
+void _apply_lambda( //
+    uint64_t data_size, //
+    const uint64_t skip, //
+    Lambda&& func, //
+    const uint64_t* qubits, // sorted
+    const unsigned omp_threads, //
+    const param_t &params) {
+
+  const uint64_t END = data_size >> N;
+
+#pragma omp parallel for if (omp_threads > 1) num_threads(omp_threads)
+  for (uint64_t k = 0; k < END; k += skip) {
+    const auto idx = index0<N>(qubits, k);
+    std::forward <Lambda> (func)(idx, params);
+  }
+}
+
+template<typename Lambda, typename list_t, typename param_t>
+void _apply_lambda(uint64_t data_size, const uint64_t skip, Lambda&& func, const list_t &qubits, const unsigned omp_threads, const param_t &params) {
+
+  const auto NUM_QUBITS = qubits.size();
+  const uint64_t END = data_size >> NUM_QUBITS;
+  auto qubits_sorted = qubits;
+  std::sort(qubits_sorted.begin(), qubits_sorted.end());
+
+#pragma omp parallel for if (omp_threads > 1) num_threads(omp_threads)
+  for (uint64_t k = 0; k < END; k += skip) {
+    const auto inds = _indexes(qubits, qubits_sorted, k);
+    std::forward < Lambda > (func)(inds, params);
+  }
+}
+
+template<size_t N, typename data_t>
+inline void _reorder(const uint64_t* qreg_orig, uint64_t* qreg, data_t* fmat) {
+  auto dim = (1ULL << N);
+
+  // sort qreg_org
+  for (unsigned i = 0; i < N; ++i) {
+    for (unsigned j = 0; j < N - 1 - i; ++j) {
+      if (qreg[j] > qreg[j + 1]) {
+        auto tmp = qreg[j];
+        qreg[j] = qreg[j + 1];
+        qreg[j + 1] = tmp;
+      }
+    }
+  }
+
+  unsigned masks[N];
+
+  for (size_t i = 0; i < N; ++i)
+    for (size_t j = 0; j < N; ++j)
+      if (qreg_orig[i] == qreg[j])
+        masks[i] = 1U << j;
+
+  size_t indexes[1U << N];
+  for (size_t i = 0; i < dim; ++i) {
+    size_t index = 0U;
+    for (size_t j = 0; j < N; ++j) {
+      if (i & (1U << j))
+        index |= masks[j];
+    }
+    indexes[i] = index;
+  }
+
+  data_t fmat_org[1 << (N * 2 + 1)];
+  for (size_t i = 0; i < dim * dim * 2; ++i)
+    fmat_org[i] = fmat[i];
+
+  for (unsigned i = 0; i < dim; ++i) {
+    for (unsigned j = 0; j < dim; ++j) {
+      unsigned oldidx = i * dim + j;
+      unsigned newidx = indexes[i] * dim + indexes[j];
+      fmat[newidx * 2] = fmat_org[oldidx * 2];
+      fmat[newidx * 2 + 1] = fmat_org[oldidx * 2 + 1];
+    }
+  }
 }
 
 template<size_t N>
-inline Avx _apply_avx_kernel(
-  const areg_t<N>& qregs,
-  std::complex<double>* data,
-  uint64_t data_size,
-  const QV::cvector_t<double>& mat,
-  uint_t omp_threads
-){
-
-  RealVectorView<double> real = {data};
-  ImaginaryVectorView<double> img = {data};
-
-  if (qregs.size() > 1 && qregs[1] == 1) {
-    auto lambda = [&](const areg_t<(1 << N)>& inds, const QV::cvector_t<double>& dmat) -> void {
-      _apply_matrix_double_avx_q0q1(real, img, dmat, inds, qregs);
-    };
-
-    QV::apply_lambda(0, data_size, 1, omp_threads, lambda, qregs, mat);
-
-  } else if (qregs[0] < 2) {
-    auto lambda = [&](const areg_t<(1 << N)>& inds, const QV::cvector_t<double>& dmat) -> void {
-      _apply_matrix_double_avx_qL(real, img, dmat, inds, qregs);
-    };
-
-    QV::apply_lambda(0, data_size, 2, omp_threads, lambda, qregs, mat);
-
-  } else {
-    auto lambda = [&](const areg_t<(1 << N)>& inds, const QV::cvector_t<double>& dmat) -> void {
-      _apply_matrix_double_avx(real, img, dmat, inds, qregs);
-    };
-
-    QV::apply_lambda(0, data_size, 4, omp_threads, lambda, qregs, mat);
-
-  }
-  return Avx::Applied;
-}
-
-
-template<typename FloatType>
-typename std::enable_if<std::is_same<FloatType, double>::value, bool>::type
-is_simd_applicable(uint64_t data_size){
-  if (data_size <= 4)
-    return false;
-  return true;
-}
-
-template<typename FloatType>
-typename std::enable_if<std::is_same<FloatType, float>::value, bool>::type
-is_simd_applicable(uint64_t data_size){
+inline bool _apply_matrix_float(  //
+    void * _data, //
+    uint64_t data_size, //
+    const uint64_t* qregs_,
+    const void* mat, //
+    const unsigned omp_threads //
+    ) {
   if (data_size <= 8)
     return false;
+
+  float* data = (float*) _data;
+  float* fmat_orig = (float*) mat;
+
+  float fmat[(1 << (N * 2 + 1))];
+  memcpy(fmat, mat, sizeof(float) * (1 << (N * 2 + 1)));
+
+// transpose
+  for (size_t i = 0; i < (1U << N); ++i) {
+    for (size_t j = 0; j < (1U << N); ++j) {
+      fmat[(i * (1U << N) + j) * 2] = fmat_orig[(j * (1U << N) + i) * 2];
+      fmat[(i * (1U << N) + j) * 2 + 1] = fmat_orig[(j * (1U << N) + i) * 2 + 1];
+    }
+  }
+
+  uint64_t qregs[N];
+  memcpy(qregs, qregs_, sizeof(uint64_t) * N);
+  if (N > 1) {
+    _reorder<N>(qregs_, qregs, fmat);
+  }
+
+  if (N > 2 && qregs[2] == 2) {
+    auto lambda = [&](const uint64_t ids0, float* _fmat)->void {
+      _apply_matrix_float_avx_q0q1q2<N>(data, _fmat, qregs, ids0);
+    };
+    _apply_lambda<N>(data_size, 1, lambda, qregs, omp_threads, (float*) fmat);
+  } else if (N > 1 && qregs[1] < 3) {
+    auto lambda = [&](const uint64_t ids0, float* _fmat)->void {
+      _apply_matrix_float_avx_qLqL<N>(data, _fmat, qregs, ids0);
+    };
+    _apply_lambda<N>(data_size, 2, lambda, qregs, omp_threads, (float*) fmat);
+  } else if (qregs[0] < 3) {
+    auto lambda = [&](const uint64_t ids0, float* _fmat)->void {
+      _apply_matrix_float_avx_qL<N>(data, _fmat, qregs, ids0);
+    };
+    _apply_lambda<N>(data_size, 4, lambda, qregs, omp_threads, (float*) fmat);
+  } else {
+    auto lambda = [&](const uint64_t ids0, float* _fmat)->void {
+      _apply_matrix_float_avx<N>(data, _fmat, qregs, ids0);
+    };
+    _apply_lambda<N>(data_size, 8, lambda, qregs, omp_threads, (float*) fmat);
+  }
   return true;
 }
 
-template<typename FloatType, size_t N>
-inline Avx apply_matrix_avx(
-    std::complex<FloatType>* data,
-    uint64_t data_size,
-    const areg_t<N>& qregs,
-    const cvector_t<FloatType>& mat,
-    uint_t omp_threads
-){
+template<size_t N>
+inline bool _apply_matrix_double(  //
+    void * _data, //
+    uint64_t data_size, //
+    const uint64_t* qregs_,
+    const void* mat, //
+    const unsigned omp_threads //
+    ) {
+  if (data_size <= 4)
+    return false;
 
-  if (!is_simd_applicable<FloatType>(data_size))
-    return Avx::NotApplied;
+  double dmat[(1 << (N * 2 + 1))];
+  memcpy(dmat, mat, sizeof(uint64_t) * (1 << (N * 2 + 1)));
 
-  auto transpose = [](const cvector_t<FloatType>& matrix) -> cvector_t<FloatType> {
-      cvector_t<FloatType> transposed(matrix.size());
-      // We deal with MxM matrices, so let's take rows for example
-      auto rows = sqrt(matrix.size());
-      for(size_t i = 0; i < rows; ++i){
-          for(size_t j = 0; j < rows; ++j){
-              transposed[ i * rows + j] = matrix[ j * rows + i ];
-          }
-      }
-      return transposed;
-  };
+  double* dmat_orig = (double*) mat;
 
-  auto transposed_mat = transpose(mat);
-  auto ordered_qregs = qregs;
-  reorder(ordered_qregs, transposed_mat);
-  return _apply_avx_kernel<N>(ordered_qregs, data, data_size, transposed_mat, omp_threads);
+// transpose
+  for (size_t i = 0; i < (1U << N); ++i) {
+    for (size_t j = 0; j < (1U << N); ++j) {
+      dmat[(i * (1U << N) + j) * 2] = dmat_orig[(j * (1U << N) + i) * 2];
+      dmat[(i * (1U << N) + j) * 2 + 1] = dmat_orig[(j * (1U << N) + i) * 2 + 1];
+    }
+  }
+
+  uint64_t qregs[N];
+  memcpy(qregs, qregs_, sizeof(uint64_t) * N);
+  if (N > 1) {
+    _reorder<N>(qregs_, qregs, dmat);
+  }
+
+  double* data = (double*) _data;
+
+  if (N > 1 && qregs[1] == 1) {
+    auto lambda = [&](const uint64_t ids0, double* _dmat)->void {
+      _apply_matrix_double_avx_q0q1<N>(data, _dmat, qregs, ids0);
+    };
+    _apply_lambda<N>(data_size, 1, lambda, qregs, omp_threads, (double*) dmat);
+  } else if (qregs[0] < 2) {
+    auto lambda = [&](const uint64_t ids0, double* _dmat)->void {
+      _apply_matrix_double_avx_qL<N>(data, _dmat, qregs, ids0);
+    };
+    _apply_lambda<N>(data_size, 2, lambda, qregs, omp_threads, (double*) dmat);
+  } else {
+    auto lambda = [&](const uint64_t ids0, double* _dmat)->void {
+      _apply_matrix_double_avx<N>(data, _dmat, qregs, ids0);
+    };
+    _apply_lambda<N>(data_size, 4, lambda, qregs, omp_threads, (double*) dmat);
+  }
+  return true;
 }
 
-template<typename FloatType>
-inline Avx apply_matrix_avx(
-  std::complex<FloatType>* qv_data,
-  uint64_t data_size,
-  const reg_t& qregs,
-  const cvector_t<FloatType>& mat,
-  uint_t omp_threads
-){
-
-  switch (qregs.size()) {
-  case 1:
-    return apply_matrix_avx(qv_data, data_size, to_array<1>(qregs), mat, omp_threads);
-  case 2:
-    return apply_matrix_avx(qv_data, data_size, to_array<2>(qregs), mat, omp_threads);
-  case 3:
-    return apply_matrix_avx(qv_data, data_size, to_array<3>(qregs), mat, omp_threads);
-  case 4:
-    return apply_matrix_avx(qv_data, data_size, to_array<4>(qregs), mat, omp_threads);
-  case 5:
-    return apply_matrix_avx(qv_data, data_size, to_array<5>(qregs), mat, omp_threads);
-  case 6:
-    return apply_matrix_avx(qv_data, data_size, to_array<6>(qregs), mat, omp_threads);
-  default:
-    return Avx::NotApplied;
+template<typename data_t, size_t N>
+inline bool apply_matrix_avx( //
+    void * qv_data, //
+    uint64_t data_size, //
+    const uint64_t* qregs,
+    const void* mat, //
+    const unsigned omp_threads //
+    ) {
+  if (sizeof(data_t) == sizeof(float)) {
+    return _apply_matrix_float<N>(qv_data, data_size, qregs, mat, omp_threads);
+  } else {
+    return _apply_matrix_double<N>(qv_data, data_size, qregs, mat, omp_threads);
   }
 }
 
-inline bool is_avx2_supported(){
+template<typename data_t>
+inline bool apply_matrix_avx( //
+    void * qv_data, //
+    uint64_t data_size, //
+    const uint64_t* qregs, //
+    const uint64_t qregs_size, //
+    const void* mat, //
+    const unsigned omp_threads //
+    ) {
+  switch (qregs_size) {
+  case 1:
+    return apply_matrix_avx<data_t, 1>(qv_data, data_size, qregs, mat, omp_threads);
+  case 2:
+    return apply_matrix_avx<data_t, 2>(qv_data, data_size, qregs, mat, omp_threads);
+  case 3:
+    return apply_matrix_avx<data_t, 3>(qv_data, data_size, qregs, mat, omp_threads);
+  case 4:
+    return apply_matrix_avx<data_t, 4>(qv_data, data_size, qregs, mat, omp_threads);
+  case 5:
+    return apply_matrix_avx<data_t, 5>(qv_data, data_size, qregs, mat, omp_threads);
+  case 6:
+    return apply_matrix_avx<data_t, 6>(qv_data, data_size, qregs, mat, omp_threads);
+  default:
+    return false;
+  }
+}
+
+inline bool is_avx2_supported() {
   static bool cached = false;
   static bool is_supported = false;
-  if(cached)
+  if (cached)
     return is_supported;
 
-  std::array<int, 4> cpui;
- ccpuid(cpui.data(), 0);
+  int cpui[4] = {0};
+  ccpuid(cpui, 0);
   auto num_ids = cpui[0];
-  if(num_ids < 7){
+  if (num_ids < 7) {
     cached = true;
     is_supported = false;
     return false;
   }
 
-  std::vector<std::array<int, 4>> data;
-  for (int i = 0; i <= num_ids; ++i){
-      cpuidex(cpui.data(), i, 0);
-      data.push_back(cpui);
+  //check fma
+  cpuidex(cpui, 1, 0);
+  if (!(cpui[2] & (1 << 1))) {
+    cached = true;
+    is_supported = false;
+    return false;
   }
 
-  std::bitset<32> f_1_ECX = data[1][2];
-  std::bitset<32> f_7_EBX = data[7][1];
-
-  bool is_fma_supported = (f_1_ECX[12] & 1);
-  bool is_avx2_supported = (f_7_EBX[5] & 1);
+  //check AVX2
+  cpuidex(cpui, 7, 0);
+  if (!(cpui[1] & (1 << 5))) {
+    cached = true;
+    is_supported = false;
+    return false;
+  }
 
   cached = true;
-  is_supported = is_fma_supported && is_avx2_supported;
+  is_supported = true;
   return is_supported;
 }
 

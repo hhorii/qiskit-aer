@@ -11,41 +11,66 @@
  * copyright notice, and modified files need to carry a notice indicating
  * that they have been altered from the originals.
  */
+#include "qvintrin.hpp"
 
+#ifdef __PPC__ | __PPC64__
+// PPC
+#elif defined(__arm__) || defined(__arm64__)
+// ARM
+#else
+// INTEL
 #ifdef _MSC_VER
 #include <intrin.h>
 #elif defined(__GNUC__)
 #include <cpuid.h>
 #endif
-
-#include "qvintrin.hpp"
-#include "qubitvector.hpp"
 #include "qvintrin_avx.hpp"
+#endif
 
 using namespace QV;
 
-inline bool is_intrinsics () {
+bool is_intrinsics () {
+#ifdef __PPC__ | __PPC64__
+  return false;
+#elif defined(__arm__) || defined(__arm64__)
+  return false;
+#else
   return is_avx2_supported();
+#endif
 }
 
-inline bool apply_matrix_opt(std::complex<float>* qv_data,
-    uint_t data_size,
-    const reg_t& qregs,
-    const cvector_t<float>& mat,
-    uint_t omp_threads) {
-
+bool apply_matrix_opt(
+    float* qv_data,
+    const uint64_t data_size,
+    const uint64_t* qregs,
+    const uint64_t qregs_size,
+    const float* fmat,
+    const uint_t omp_threads) {
+#ifdef __PPC__ | __PPC64__
+  return false;
+#elif defined(__arm__) || defined(__arm64__)
+  return false;
+#else
   return apply_matrix_avx <float> (
-      qv_data, data_size, qregs, mat, omp_threads) != Avx::NotApplied;
+      qv_data, data_size, qregs, qregs_size, fmat, omp_threads);
+#endif
 }
 
-inline bool apply_matrix_opt(std::complex<double>* qv_data,
-    uint_t data_size,
-    const reg_t& qregs,
-    const cvector_t<double>& mat,
+bool apply_matrix_opt(
+    double* qv_data,
+    const uint64_t data_size,
+    const uint64_t* qregs,
+    const uint64_t qregs_size,
+    const double* dmat,
     uint_t omp_threads) {
-
+#ifdef __PPC__ | __PPC64__
+  return false;
+#elif defined(__arm__) || defined(__arm64__)
+  return false;
+#else
   return apply_matrix_avx <double> (
-      qv_data, data_size, qregs, mat, omp_threads) != Avx::NotApplied;
+      qv_data, data_size, qregs, qregs_size, dmat, omp_threads);
+#endif
 }
 
 

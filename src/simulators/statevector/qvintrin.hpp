@@ -29,6 +29,16 @@
 #include <stdexcept>
 #include <memory>
 
+#if defined(__PPC__) | defined(__PPC64__)
+#elif defined(__arm__) || defined(__arm64__)
+#else
+#ifdef _QV_HEDDER_ONLY
+#include <cpuid.h>
+// only if x86
+#include "qvintrin_avx.hpp"
+#endif
+#endif
+
 namespace QV {
 
 // Type aliases
@@ -39,20 +49,70 @@ using indexes_t = std::unique_ptr<uint_t[]>;
 template <size_t N> using areg_t = std::array<uint_t, N>;
 template <typename T> using cvector_t = std::vector<std::complex<T>>;
 
+#ifdef _QV_HEDDER_ONLY
+bool is_intrinsics () {
+#if defined(__PPC__) | defined(__PPC64__)
+  return false;
+#elif defined(__arm__) || defined(__arm64__)
+  return false;
+#else
+  return is_avx2_supported();
+#endif
+}
+
+bool apply_matrix_opt(
+    float* qv_data,
+    const uint64_t data_size,
+    const uint64_t* qregs,
+    const uint64_t qregs_size,
+    const float* fmat,
+    const uint_t omp_threads) {
+#if defined(__PPC__) | defined(__PPC64__)
+  return false;
+#elif defined(__arm__) || defined(__arm64__)
+  return false;
+#else
+  return apply_matrix_avx <float> (
+      (void *) qv_data, data_size, qregs, qregs_size, fmat, omp_threads);
+#endif
+}
+
+bool apply_matrix_opt(
+    double* qv_data,
+    const uint64_t data_size,
+    const uint64_t* qregs,
+    const uint64_t qregs_size,
+    const double* dmat,
+    const uint_t omp_threads) {
+
+#if defined(__PPC__) | defined(__PPC64__)
+  return false;
+#elif defined(__arm__) || defined(__arm64__)
+  return false;
+#else
+  return apply_matrix_avx <double> (
+      qv_data, data_size, qregs, qregs_size, dmat, omp_threads);
+#endif
+}
+#else
 bool is_intrinsics();
 
-bool apply_matrix_opt(std::complex<float>* qv_data,
-    uint_t data_size,
-    const reg_t& qregs,
-    const cvector_t<float>& mat,
+bool apply_matrix_opt(
+    float* qv_data,
+    const uint64_t data_size,
+    const uint64_t* qregs,
+    const uint64_t qregs_size,
+    float* mat,
     uint_t omp_threads);
 
-bool apply_matrix_opt(std::complex<double>* qv_data,
-    uint_t data_size,
-    const reg_t& qregs,
-    const cvector_t<double>& mat,
-    uint_t omp_threads);
-
+bool apply_matrix_opt(
+    double* qv_data,
+    const uint64_t data_size,
+    const uint64_t* qregs,
+    const uint64_t qregs_size,
+    const double* mat,
+    const uint_t omp_threads);
+#endif
 }
 //------------------------------------------------------------------------------
 #endif // end module
