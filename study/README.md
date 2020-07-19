@@ -23,6 +23,11 @@ git clone --depth 1 --branch 1.9.5 https://github.com/thrust/thrust.git thrust
 g++ -O3 -I. -DTHRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_OMP -std=c++11 -o qft_thrust_omp qft_thrust.cpp -ffast-math -fopenmp
 
 nvcc -O3 -DTHRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_CUDA -std=c++11 -o qft_thrust qft_thrust.cu
+
+g++ -c -I . -I /usr/local/opt/openblas/include/ -L /usr/local/opt/openblas/lib/ -lopenblas -ffast-math -fopenmp -O3 -DNDEBUG -fopenmp -std=gnu++17 qft_mps.cpp
+g++ -o qft_mps -I . -I /usr/local/opt/openblas/include/ -L /usr/local/opt/openblas/lib/ -lopenblas -ffast-math -fopenmp -O3 -DNDEBUG -fopenmp -std=gnu++17 qft_mps.o libitensor-g.a
+
+
 ```
 
 ## python
