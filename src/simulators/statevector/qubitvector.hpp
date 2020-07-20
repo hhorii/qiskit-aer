@@ -27,11 +27,14 @@
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
+#include <chrono>
 
 #include "simulators/statevector/indexes.hpp"
 #include "framework/json.hpp"
 
 namespace QV {
+
+using myclock_t = std::chrono::high_resolution_clock;
 
 template <typename T> using cvector_t = std::vector<std::complex<T>>;
 
@@ -451,28 +454,12 @@ protected:
   //-----------------------------------------------------------------------
   // Statevector Sampler Utilities
   //-----------------------------------------------------------------------
-
-  //----------------------------------------------------------------
-  // Function name: get_accumulated_probabilities_vector
-  // Description: Computes the accumulated probabilities from 0
-  // Parameters: qubits - the qubits for which we compute probabilities
-  // Returns: acc_probvector - the vector of accumulated probabilities
-  //          index_vec - the base values whose probabilities are not 0
-  // For example:
-  // if probabilities vector is: 0.5 (00), 0.0 (01), 0.2 (10), 0.3 (11), then
-  // acc_probvector = 0.0,    0.5,    0.7,   1.0
-  // index_vec =      0 (00), 2 (10), 3(11)
-  //----------------------------------------------------------------
-  void get_accumulated_probabilities_vector(std::vector<double>& acc_probvector,
-              reg_t& index_vec) const;
-
   // Return M sampled outcomes for Z-basis measurement of all qubits
   // by using accumulated probabilities
-  reg_t sample_measure_with_bs(const std::vector<double> &rnds) const;
+  reg_t sample_measure_with_binary_search(const std::vector<double> &rnds) const;
 
   // Return M sampled outcomes for Z-basis measurement of all qubits
-  // with consideration of memory affinity
-  reg_t sample_measure_with_memory_affinity(const std::vector<double> &rnds) const;
+  reg_t sample_measure_with_iterative_search(const std::vector<double> &rnds) const;
 
 
 };
@@ -1956,21 +1943,6 @@ std::vector<double> QubitVector<data_t>::probabilities(const reg_t &qubits) cons
   return probs;
 }
 
-template <typename data_t>
-void QubitVector<data_t>::get_accumulated_probabilities_vector(std::vector<double>& acc_probvector, 
-							       reg_t& index_vec) const {
-  uint_t size = 1LL << num_qubits_;
-  uint_t j = 1;
-  acc_probvector.push_back(0.0);
-  for (uint_t i=0; i<size; i++) {
-    if (!AER::Linalg::almost_equal(probability(i), 0.0)) {
-      index_vec.push_back(i);
-      acc_probvector.push_back(acc_probvector[j-1] + probability(i));
-      j++;
-    }
-  }
-}
-
 //------------------------------------------------------------------------------
 // Sample measure outcomes
 //------------------------------------------------------------------------------
@@ -1978,54 +1950,104 @@ template <typename data_t>
 reg_t QubitVector<data_t>::sample_measure(const std::vector<double> &rnds) const {
 
   reg_t ret;
+  auto timer_start = myclock_t::now();
   std::string sampling_method;
   if (sample_measure_index_size_ < 0) {
-    ret = sample_measure_with_bs(rnds);
+    ret = sample_measure_with_binary_search(rnds);
+    sampling_method = "binary_search";
   } else {
-    ret = sample_measure_with_memory_affinity(rnds);
+    ret = sample_measure_with_iterative_search(rnds);
+    sampling_method = "indexing";
   }
   auto timer_stop = myclock_t::now();
+  std::cout << "DEBUG[sample_measure]: " << sampling_method << ": " << (std::chrono::duration<double>(timer_stop - timer_start).count()) << std::endl;
   return ret;
 
 }
 
 template <typename data_t>
-reg_t QubitVector<data_t>::sample_measure_with_bs(const std::vector<double> &rnds) const {
+reg_t QubitVector<data_t>::sample_measure_with_binary_search(const std::vector<double> &rnds) const {
+
   const uint_t SHOTS = rnds.size();
   reg_t samples;
   samples.assign(SHOTS, 0);
-  std::vector<double> acc_probvector;
-  reg_t index_vec;
-  get_accumulated_probabilities_vector(acc_probvector, index_vec);
-  uint_t accvec_size = acc_probvector.size();
-  uint_t rnd_index;
+  std::vector<std::vector<double>> acc_probs_list;
+  std::vector<reg_t> acc_idxs_list;
+  std::vector<double> start_probs;
+  std::vector<double> end_probs;
+
+  const int PARTITION_QBIT = 10;
+  const int_t PARTITION_SIZE = 1UL << PARTITION_QBIT;
+
+  acc_probs_list.assign(PARTITION_SIZE, std::vector<double>());
+  acc_idxs_list.assign(PARTITION_SIZE, reg_t());
+  start_probs.assign(PARTITION_SIZE, 0.);
+  end_probs.assign(PARTITION_SIZE, 0.);
+
+  // inclusive scan for each partition
+  #pragma omp parallel for if (PARTITION_SIZE > omp_threshold_ && omp_threads_ > 1) num_threads(omp_threads_)
+  for (int_t i = 0; i < PARTITION_SIZE; ++i) {
+    double accumulated = .0;
+    for (uint_t j = PARTITION_SIZE * i; j < PARTITION_SIZE * (i + 1); j++) {
+      if (!AER::Linalg::almost_equal(probability(j), 0.0)) {
+        accumulated += probability(j);
+        acc_probs_list[i].push_back(accumulated);
+        acc_idxs_list[i].push_back(j);
+      }
+    }
+    end_probs[i] = accumulated;
+  }
+
+  for (int_t i = 1; i < PARTITION_SIZE; ++i)
+    start_probs[i] = end_probs[i -1] + start_probs[i - 1];
+
 #pragma omp parallel for if (SHOTS > omp_threshold_ && omp_threads_ > 1) num_threads(omp_threads_)
   for (int_t i = 0; i < SHOTS; ++i) {
     double rnd = rnds[i];
 
-    // binary search for which range rnd is in
+    // binary search for partition
+    int partition_idx = 0;
     uint_t first = 0;
-    uint_t last = accvec_size-1;
+    uint_t last = PARTITION_SIZE - 1;
     uint_t mid = 0;
-    while(true) {
-      if (first >= last-1) {
-        rnd_index = first;
+
+    while (true) {
+      if (first >= last - 1) {
+        partition_idx = first;
         break;
       }
-      mid = (first+last)/2;
-      if (rnd <= acc_probvector[mid])
+      mid = (first + last) / 2;
+      if (rnd <= start_probs[mid])
         last = mid;
       else
         first = mid;
     }
-    
-    samples[i] = index_vec[rnd_index];
+
+    rnd -= start_probs[partition_idx];
+
+    // binary search for which range rnd is in
+    int sample_idx;
+    first = 0;
+    last = acc_probs_list[partition_idx].size() - 1;
+    mid = 0;
+    while(true) {
+      if (first >= last - 1) {
+        sample_idx = first;
+        break;
+      }
+      mid = (first + last) / 2;
+      if (rnd <= acc_probs_list[partition_idx][mid])
+        last = mid;
+      else
+        first = mid;
+    }
+    samples[i] = acc_idxs_list[partition_idx][sample_idx];
   }
   return samples;
 }
 
 template <typename data_t>
-reg_t QubitVector<data_t>::sample_measure_with_memory_affinity(const std::vector<double> &rnds) const {
+reg_t QubitVector<data_t>::sample_measure_with_iterative_search(const std::vector<double> &rnds) const {
 
   const int_t END = 1LL << num_qubits();
   const int_t SHOTS = rnds.size();
