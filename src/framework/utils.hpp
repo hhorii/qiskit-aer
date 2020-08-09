@@ -1508,7 +1508,7 @@ std::string bin2hex(std::string str, bool prefix) {
     hex += part;
     // Add any additional chunks
     for (size_t j=1; j < chunks; ++j) {
-      std::stringstream ss; // clear string stream
+      ss = std::stringstream(); // clear string stream
       ss << std::hex << std::stoull(str.substr(remain + j * bin_block, bin_block), nullptr, 2);
       part = ss.str();
       part.insert(0, hex_block - part.size(), '0');
@@ -1563,6 +1563,21 @@ uint_t popcount(const uint_t count_) {
   return count;
 }
 
+template <typename V, typename T>
+int_t index_of(V& v, T& t, int_t first, int_t last) {
+  int_t mid = 0;
+  while (true) {
+    if (first >= last - 1) {
+      return first;
+      break;
+    }
+    mid = (first + last) / 2;
+    if (t <= v[mid])
+      last = mid;
+    else
+      first = mid;
+  }
+}
 
 //------------------------------------------------------------------------------
 } // end namespace Utils

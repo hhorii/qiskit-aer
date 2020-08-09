@@ -278,8 +278,8 @@ protected:
   // OpenMP qubit threshold
   int omp_qubit_threshold_ = 14;
 
-  // QubitVector sample measure index size
-  int sample_measure_index_size_ = 10;
+  // QubitVector sample measure index size (default is -1)
+  int sample_measure_index_size_ = -1;
 
   // Threshold for chopping small values to zero in JSON
   double json_chop_threshold_ = 1e-10;
@@ -289,7 +289,6 @@ protected:
 
   // Table of allowed snapshot types to enum class members
   const static stringmap_t<Snapshots> snapshotset_;
-
 };
 
 
@@ -425,6 +424,7 @@ void State<statevec_t>::set_config(const json_t &config) {
   int index_size;
   if (JSON::get_value(index_size, "statevector_sample_measure_opt", config)) {
     BaseState::qreg_.set_sample_measure_index_size(index_size);
+    sample_measure_index_size_ = index_size;
   };
 }
 
@@ -887,6 +887,10 @@ template <class statevec_t>
 std::vector<reg_t> State<statevec_t>::sample_measure(const reg_t &qubits,
                                                      uint_t shots,
                                                      RngEngine &rng) {
+
+  if (sample_measure_index_size_ < 0)
+    BaseState::qreg_.set_sample_measure_index_memory_mb(BaseState::available_memory_mb_);
+
   // Generate flat register for storing
   std::vector<double> rnds;
   rnds.reserve(shots);

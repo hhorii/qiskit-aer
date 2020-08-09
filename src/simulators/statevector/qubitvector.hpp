@@ -101,6 +101,9 @@ public:
   // Returns required memory
   size_t required_memory_mb(uint_t num_qubits) const;
 
+  // Set available memory for this qubit vector
+  void available_memory_mb(size_t memory_mb) { available_memory_mb_ = memory_mb; };
+
   // Returns a copy of the underlying data_t data as a complex vector
   cvector_t<data_t> vector() const;
 
@@ -296,24 +299,24 @@ public:
   void set_omp_threads(int n);
 
   // Get the maximum number of OpenMP thread for operations.
-  uint_t get_omp_threads() {return omp_threads_;}
+  uint_t get_omp_threads() const {return omp_threads_;}
 
   // Set the qubit threshold for activating OpenMP.
   // If self.qubits() > threshold OpenMP will be activated.
   void set_omp_threshold(int n);
 
   // Get the qubit threshold for activating OpenMP.
-  uint_t get_omp_threshold() {return omp_threshold_;}
+  uint_t get_omp_threshold() const {return omp_threshold_;}
 
   //-----------------------------------------------------------------------
   // Optimization configuration settings
   //-----------------------------------------------------------------------
 
   // Set the sample_measure index size
-  void set_sample_measure_index_size(int n) {sample_measure_index_size_ = n;}
+  void set_sample_measure_index_size(int n) { sample_measure_index_size_ = n;}
 
-  // Get the sample_measure index size
-  int get_sample_measure_index_size() {return sample_measure_index_size_;}
+  // Set the sample_measure index memory mb
+  void set_sample_measure_index_memory_mb(size_t memory_mb);
 
 protected:
 
@@ -333,6 +336,8 @@ protected:
   int sample_measure_index_size_ = 10; // Sample measure indexing qubit size
   double json_chop_threshold_ = 0;  // Threshold for choping small values
                                     // in JSON serialization
+
+  size_t available_memory_mb_;
   inline uint_t omp_threads_managed() const { return (num_qubits_ > omp_threshold_ && omp_threads_ > 1) ? omp_threads_: 0; }
 
   //-----------------------------------------------------------------------
@@ -452,17 +457,6 @@ protected:
   std::complex<double> apply_reduction_lambda(Lambda&& func,
                                               const list_t &qubits,
                                               const param_t &params) const;
-
-  //-----------------------------------------------------------------------
-  // Statevector Sampler Utilities
-  //-----------------------------------------------------------------------
-  // Return M sampled outcomes for Z-basis measurement of all qubits
-  // by using accumulated probabilities
-  reg_t sample_measure_with_binary_search(const std::vector<double> &rnds) const;
-
-  // Return M sampled outcomes for Z-basis measurement of all qubits
-  reg_t sample_measure_with_iterative_search(const std::vector<double> &rnds) const;
-
 
   // Free allocated memory
   void free_mem();
@@ -851,6 +845,15 @@ void QubitVector<data_t, Derived>::set_omp_threshold(int n) {
 template <typename data_t, typename Derived>
 void QubitVector<data_t, Derived>::set_json_chop_threshold(double threshold) {
   json_chop_threshold_ = threshold;
+}
+
+template <typename data_t, typename Derived>
+void QubitVector<data_t, Derived>::set_sample_measure_index_memory_mb(size_t memory_mb) {
+
+  if (memory_mb == 0)
+    return;
+
+  sample_measure_index_size_ = std::log2(memory_mb) + 20 - std::log2(sizeof(std::complex<data_t>));
 }
 
 /*******************************************************************************
@@ -1911,211 +1914,166 @@ std::vector<double> QubitVector<data_t, Derived>::probabilities(const reg_t &qub
   return probs;
 }
 
-//------------------------------------------------------------------------------
-// Sample measure outcomes
-//------------------------------------------------------------------------------
-template <typename data_t, typename Derived>
-reg_t QubitVector<data_t, Derived>::sample_measure(const std::vector<double> &rnds) const {
+// Get samples with saving memory with following methods of DATA.
+template <typename Lambda>
+reg_t sample_with_iterative_search(const std::vector<double> &rnds,
+                                   const uint_t num_qubits,
+                                   const uint_t index_size,
+                                   const Lambda probability_func,
+                                   const uint_t omp_threads) {
 
-  reg_t ret;
-  auto timer_start = myclock_t::now();
-  std::string sampling_method;
-  if (sample_measure_index_size_ < 0) {
-    ret = sample_measure_with_binary_search(rnds);
-    sampling_method = "binary_search";
-  } else {
-    ret = sample_measure_with_iterative_search(rnds);
-    sampling_method = "indexing";
-  }
-  auto timer_stop = myclock_t::now();
-  std::cout << "DEBUG[sample_measure]: " << sampling_method << ": " << (std::chrono::duration<double>(timer_stop - timer_start).count()) << std::endl;
-  return ret;
-
-}
-
-template <typename data_t>
-reg_t QubitVector<data_t>::sample_measure_with_binary_search(const std::vector<double> &rnds) const {
-
+  const int_t END = 1UL << num_qubits;
   const uint_t SHOTS = rnds.size();
+  const int_t INDEX_SIZE = std::min(index_size, num_qubits - 1);
+  const int_t INDEX_END = 1UL << INDEX_SIZE;
+
   reg_t samples;
   samples.assign(SHOTS, 0);
+
+  // Initialize indices
+  std::vector<double> idxs;
+  idxs.assign(INDEX_END, 0.0);
+  const uint_t LOOP = (END >> INDEX_SIZE);
+
+  // Construct indices
+  auto idxing = [&](const int_t i)->void {
+    uint_t base = LOOP * i;
+    double total = .0;
+    double p = .0;
+    for (uint_t j = LOOP * i; j < LOOP * (i + 1); j++) {
+      p = probability_func(j);
+      total += p;
+    }
+    idxs[i] = total;
+  };
+  QV::apply_lambda(0, INDEX_END, omp_threads, idxing);
+
+  // accumulate indices
+  for (uint_t i = 1; i < INDEX_END; ++i)
+    idxs[i] += idxs[i - 1];
+
+  // reduce rounding error
+  double correction = 1.0 / idxs[INDEX_END - 1];
+  for (int_t i = 1; i < INDEX_END - 1; ++i)
+    idxs[i] *= correction;
+  idxs[INDEX_END - 1] = 1.0;
+
+  // sort random numbers
+  auto rnds_ = rnds;
+  std::sort(rnds_.begin(), rnds_.end());
+
+  // find starting index
+  std::vector<int_t> starts;
+  starts.assign(INDEX_END + 1, 0);
+  starts[INDEX_END] = SHOTS;
+
+  uint_t last_idx_start = 0;
+  for (int_t i = 1; i < INDEX_END; ++i) {
+    for (uint_t j = last_idx_start; j < SHOTS; ++j) {
+      if (rnds_[j] < idxs[i - 1])
+        continue;
+      starts[i] = j;
+      last_idx_start = j;
+      break;
+    }
+  }
+
+  // sampling
+  auto sampling = [&](const int_t i)->void {
+    uint_t start_sample_idx = starts[i];
+    uint_t end_sample_idx = starts[i + 1];
+    auto sample = LOOP * i;
+    double p = (i == 0) ? 0.0 : idxs[i - 1];
+    for (uint_t sample_idx = start_sample_idx; sample_idx < end_sample_idx; ++sample_idx) {
+      auto rnd = rnds_[sample_idx];
+      for (; sample < LOOP * (i + 1) - 1; ++sample) {
+        p += probability_func(sample);
+        if (rnd < p){
+          break;
+        }
+      }
+      samples[sample_idx] = sample;
+    }
+  };
+  QV::apply_lambda(0, INDEX_END, omp_threads, sampling);
+
+  return samples;
+}
+
+// Get samples with consumption of memory with following methods of DATA.
+template <typename Lambda>
+reg_t sample_with_binary_search(const std::vector<double> &rnds,
+                                const uint_t num_qubits,
+                                const Lambda probability_func,
+                                const uint_t omp_threads) {
+
+  const int_t END = 1UL << num_qubits;
+  const uint_t SHOTS = rnds.size();
+  const uint_t PARTITION_SIZE = num_qubits < 15 ? 0: 10;
+  const int_t PARTITION_END = 1UL << PARTITION_SIZE;
+  const uint_t LOOP = (END >> PARTITION_SIZE);
+
+  reg_t samples;
+  samples.assign(SHOTS, 0);
+
   std::vector<std::vector<double>> acc_probs_list;
   std::vector<reg_t> acc_idxs_list;
   std::vector<double> start_probs;
   std::vector<double> end_probs;
 
-  const int PARTITION_QBIT = 10;
-  const int_t PARTITION_SIZE = 1UL << PARTITION_QBIT;
-
-  acc_probs_list.assign(PARTITION_SIZE, std::vector<double>());
-  acc_idxs_list.assign(PARTITION_SIZE, reg_t());
-  start_probs.assign(PARTITION_SIZE, 0.);
-  end_probs.assign(PARTITION_SIZE, 0.);
+  acc_probs_list.assign(PARTITION_END, std::vector<double>());
+  acc_idxs_list.assign(PARTITION_END, reg_t());
+  start_probs.assign(PARTITION_END, 0.);
+  end_probs.assign(PARTITION_END, 0.);
 
   // inclusive scan for each partition
-  #pragma omp parallel for if (PARTITION_SIZE > omp_threshold_ && omp_threads_ > 1) num_threads(omp_threads_)
-  for (int_t i = 0; i < PARTITION_SIZE; ++i) {
+  auto scan = [&](const int_t i)->void {
     double accumulated = .0;
-    for (uint_t j = PARTITION_SIZE * i; j < PARTITION_SIZE * (i + 1); j++) {
-      if (!AER::Linalg::almost_equal(probability(j), 0.0)) {
-        accumulated += probability(j);
+    for (uint_t j = LOOP * i; j < LOOP * (i + 1); j++) {
+      auto norm = probability_func(j);
+      if (!AER::Linalg::almost_equal(norm, 0.0)) {
+        accumulated += norm;
         acc_probs_list[i].push_back(accumulated);
         acc_idxs_list[i].push_back(j);
       }
     }
     end_probs[i] = accumulated;
-  }
+  };
+  QV::apply_lambda(0, PARTITION_END, omp_threads, scan);
 
-  for (int_t i = 1; i < PARTITION_SIZE; ++i)
+  for (int_t i = 1; i < PARTITION_END; ++i)
     start_probs[i] = end_probs[i -1] + start_probs[i - 1];
 
-#pragma omp parallel for if (SHOTS > omp_threshold_ && omp_threads_ > 1) num_threads(omp_threads_)
-  for (int_t i = 0; i < SHOTS; ++i) {
+  // sampling
+  auto sampling = [&](const int_t i)->void {
     double rnd = rnds[i];
 
     // binary search for partition
-    int partition_idx = 0;
-    uint_t first = 0;
-    uint_t last = PARTITION_SIZE - 1;
-    uint_t mid = 0;
-
-    while (true) {
-      if (first >= last - 1) {
-        partition_idx = first;
-        break;
-      }
-      mid = (first + last) / 2;
-      if (rnd <= start_probs[mid])
-        last = mid;
-      else
-        first = mid;
-    }
-
+    int_t partition_idx = AER::Utils::index_of(start_probs, rnd, 0, PARTITION_END - 1);
     rnd -= start_probs[partition_idx];
-
     // binary search for which range rnd is in
-    int sample_idx;
-    first = 0;
-    last = acc_probs_list[partition_idx].size() - 1;
-    mid = 0;
-    while(true) {
-      if (first >= last - 1) {
-        sample_idx = first;
-        break;
-      }
-      mid = (first + last) / 2;
-      if (rnd <= acc_probs_list[partition_idx][mid])
-        last = mid;
-      else
-        first = mid;
-    }
+    int_t sample_idx = AER::Utils::index_of(acc_probs_list[partition_idx], rnd, 0, acc_probs_list[partition_idx].size() - 1);
     samples[i] = acc_idxs_list[partition_idx][sample_idx];
-  }
+  };
+  QV::apply_lambda(0, SHOTS, omp_threads, sampling);
+
   return samples;
 }
 
-template <typename data_t>
-reg_t QubitVector<data_t>::sample_measure_with_iterative_search(const std::vector<double> &rnds) const {
+template <typename data_t, typename Derived>
+reg_t QubitVector<data_t, Derived>::sample_measure(const std::vector<double> &rnds) const {
 
-  const int_t END = 1LL << num_qubits();
-  const int_t SHOTS = rnds.size();
-  reg_t samples;
-  samples.assign(SHOTS, 0);
+  auto lambda = [&](const int_t outcome)->double {
+    return probability(outcome);
+  };
 
-  const int INDEX_SIZE = sample_measure_index_size_;
-  const int_t INDEX_END = BITS[INDEX_SIZE];
-  // Qubit number is below index size, loop over shots
-  if (END < INDEX_END) {
-    #pragma omp parallel if (num_qubits_ > omp_threshold_ && omp_threads_ > 1) num_threads(omp_threads_)
-    {
-      #pragma omp for
-      for (int_t i = 0; i < SHOTS; ++i) {
-        double rnd = rnds[i];
-        double p = .0;
-        int_t sample;
-        for (sample = 0; sample < END - 1; ++sample) {
-          p += probability(sample);
-          if (rnd < p)
-            break;
-        }
-        samples[i] = sample;
-      }
-    } // end omp parallel
-  }  // Qubit number is above index size, loop over index blocks
-  else {
-    // Initialize indexes
-    std::vector<double> idxs;
-    idxs.assign(INDEX_END, 0.0);
-    uint_t loop = (END >> INDEX_SIZE);
-    #pragma omp parallel if (num_qubits_ > omp_threshold_ && omp_threads_ > 1) num_threads(omp_threads_)
-    {
-      #pragma omp for
-      for (int_t i = 0; i < INDEX_END; ++i) {
-        uint_t base = loop * i;
-        double total = .0;
-        double p = .0;
-        for (uint_t j = 0; j < loop; ++j) {
-          uint_t k = base | j;
-          p = probability(k);
-          total += p;
-        }
-        idxs[i] = total;
-      }
-    } // end omp parallel
+  reg_t ret;
+  if (sample_measure_index_size_ >= num_qubits())
+    ret = sample_with_binary_search(rnds, num_qubits(), lambda, omp_threads_managed());
+  else
+    ret = sample_with_iterative_search(rnds, num_qubits(), sample_measure_index_size_, lambda, omp_threads_managed());
+  return ret;
 
-    // accumulate indices
-    for (uint_t i = 1; i < INDEX_END; ++i)
-      idxs[i] += idxs[i - 1];
-
-    // reduce rounding error
-    double correction = 1.0 / idxs[INDEX_END - 1];
-    for (int_t i = 1; i < INDEX_END - 1; ++i)
-      idxs[i] *= correction;
-
-    idxs[INDEX_END - 1] = 1.0;
-
-    auto rnds_ = rnds;
-
-    std::sort(rnds_.begin(), rnds_.end());
-
-    #pragma omp parallel for if (num_qubits_ > omp_threshold_ && omp_threads_ > 1) num_threads(omp_threads_)
-    for (int_t i = 0; i < INDEX_END; ++i) {
-      uint_t start_sample_idx = 0;
-      if (i != 0) {
-        for (uint_t sample_idx = 0; sample_idx < SHOTS; ++sample_idx) {
-          if (rnds_[sample_idx] < idxs[i - 1])
-            continue;
-          start_sample_idx = sample_idx;
-          break;
-        }
-      }
-
-      uint_t end_sample_idx = SHOTS;
-      if (i != (INDEX_END - 1)) {
-        for (uint_t sample_idx = start_sample_idx; sample_idx < SHOTS; ++sample_idx) {
-          if (rnds_[sample_idx] < idxs[i])
-            continue;
-          end_sample_idx = sample_idx;
-          break;
-        }
-      }
-
-      auto sample = loop * i;
-      double p = (i == 0) ? 0.0 : idxs[i - 1];
-
-      for (uint_t sample_idx = start_sample_idx; sample_idx < end_sample_idx; ++sample_idx) {
-        auto rnd = rnds_[sample_idx];
-        for (; sample < loop * (i + 1) - 1; ++sample) {
-          p += probability(sample);
-          if (rnd < p){
-            break;
-          }
-        }
-        samples[sample_idx] = sample;
-      }
-    }
-  }
-  return samples;
 }
 
 /*******************************************************************************
