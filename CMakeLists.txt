@@ -1,7 +1,7 @@
 # CMake config file to build AER
 #
 # For Linux and Mac, we can build both statically or dynamically. The latter is
-# the default. If you want to build an static executable/library, you need to set
+# the default. If you want to build a static executable/library, you need to set
 # STATIC_LINKING to True, example:
 #     out$ cmake -DSTATIC_LINKING=True ..
 #
@@ -15,7 +15,11 @@ project(qasm_simulator VERSION ${VERSION_NUM} LANGUAGES CXX C)
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake)
 list(APPEND CMAKE_PREFIX_PATH ${CMAKE_SOURCE_DIR}/cmake)
 
-# Warning: Because of a bug on CMake's FindBLAS or (it's not clear whoes fault is)
+if(NOT DEFINED AER_BLAS_LIB_PATH AND DEFINED ENV{AER_BLAS_LIB_PATH})
+	set(AER_BLAS_LIB_PATH $ENV{AER_BLAS_LIB_PATH})
+endif()
+
+# Warning: Because of a bug on CMake's FindBLAS or (it's not clear who's fault is)
 # libopenblas.a for Ubuntu (maybe others) we need to copy the file:
 # cmake/FindBLAS.cmake.fix-static-linking, to the directory were CMake Modules are
 # installed in the system, but with the name: FindBLAS.cmake
@@ -35,9 +39,9 @@ configure_file("${PROJECT_SOURCE_DIR}/contrib/standalone/version.hpp.in"
                "${PROJECT_SOURCE_DIR}/contrib/standalone/version.hpp")
 
 set(AER_SIMULATOR_CPP_SRC_DIR "${PROJECT_SOURCE_DIR}/src")
-set(AER_SIMULATOR_CPP_MAIN
-    "${PROJECT_SOURCE_DIR}/contrib/standalone/qasm_simulator.cpp")
-set(AER_SIMULATOR_CPP_EXTERNAL_LIBS "${USER_LIB_PATH}")
+set(AER_SIMULATOR_CPP_EXTERNAL_LIBS
+	"${AER_SIMULATOR_CPP_SRC_DIR}/third-party/win64/lib"
+	"${USER_LIB_PATH}")
 
 set(AER_COMPILER_DEFINITIONS "")
 
@@ -101,6 +105,9 @@ if(NOT MSVC)
 	enable_cxx_compiler_flag_if_supported("-Wredundant-decls")
 	enable_cxx_compiler_flag_if_supported("-Wshadow")
 	enable_cxx_compiler_flag_if_supported("-Woverloaded-virtual")
+else("Windows general compiler flags")
+	enable_cxx_compiler_flag_if_supported("/Oi") # Enable intrinsics instead of functions  (faster code)
+	enable_cxx_compiler_flag_if_supported("/bigobj")
 endif()
 
 if(STATIC_LINKING)
@@ -156,11 +163,33 @@ if(STATIC_LINKING)
 	set(BLA_STATIC TRUE)
 endif()
 
+if(STATIC_LINKING)
+	message(STATUS "Setting BLA_STATIC")
+	set(BLA_STATIC TRUE)
+endif()
+
 if(BLAS_LIB_PATH)
 	find_BLAS_in_specific_path(${BLAS_LIB_PATH})
 else()
-	set(BLAS_LIBRARIES CONAN_PKG::openblas)
+	if(APPLE)
+		message(STATUS  "Looking for Apple BLAS library...")
+		set(BLA_VENDOR "Apple")
+	else()
+		message(STATUS "Looking for OpenBLAS library...")
+		set(BLA_VENDOR "OpenBLAS")
+	endif()
+	if(WIN32)
+		message(STATUS "Uncompressing OpenBLAS static library...")
+		execute_process(COMMAND ${CMAKE_COMMAND} -E tar "xvfj" "${AER_SIMULATOR_CPP_SRC_DIR}/third-party/win64/lib/openblas.7z" WORKING_DIRECTORY  "${AER_SIMULATOR_CPP_SRC_DIR}/third-party/win64/lib/")
+	endif()
+	find_package(BLAS QUIET)
+	if(NOT BLAS_FOUND)
+		message(STATUS "OpenBLAS not found. Looking for any other BLAS library...")
+		unset(BLA_VENDOR)
+		find_package(BLAS REQUIRED)
+	endif()
 endif()
+
 message(STATUS "BLAS library found: ${BLAS_LIBRARIES}")
 
 # Windows don't have a DL library (dlopen, dlclose, etc...)
@@ -173,7 +202,15 @@ endif()
 
 # GPU support through Thrust library (CPU fallbacks)
 # Defaults to TRUE, but if no Thrust backend has been defined, will set to FALSE
-set(AER_THRUST_SUPPORTED TRUE)
+if(NOT DEFINED AER_THRUST_BACKEND)
+    set(AER_THRUST_BACKEND $ENV{AER_THRUST_BACKEND})
+    if(DEFINED AER_THRUST_BACKEND)
+        set(AER_THRUST_SUPPORTED TRUE)
+    endif()
+else()
+	set(AER_THRUST_SUPPORTED TRUE)
+endif()
+
 if(AER_THRUST_SUPPORTED)
 	if(AER_THRUST_BACKEND STREQUAL "CUDA")
 		message(STATUS "Thrust library: Looking for CUDA backend...")
@@ -187,9 +224,18 @@ if(AER_THRUST_SUPPORTED)
 			endif()
 		endif()
 		cuda_select_nvcc_arch_flags(AER_CUDA_ARCH_FLAGS ${AER_CUDA_ARCH})
-		set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -ccbin ${CMAKE_CXX_COMPILER} ${AER_CUDA_ARCH_FLAGS} -DAER_THRUST_CUDA -std=c++14 -I${AER_SIMULATOR_CPP_SRC_DIR} -isystem ${AER_SIMULATOR_CPP_SRC_DIR}/third-party/headers -use_fast_math --expt-extended-lambda")
-		set_source_files_properties(${AER_SIMULATOR_CPP_MAIN} PROPERTIES
-			CUDA_SOURCE_PROPERTY_FORMAT OBJ)
+		set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -ccbin \"${CMAKE_CXX_COMPILER}\" ${AER_CUDA_ARCH_FLAGS} -DAER_THRUST_CUDA -std=c++14 -I${AER_SIMULATOR_CPP_SRC_DIR} -isystem ${AER_SIMULATOR_CPP_SRC_DIR}/third-party/headers -use_fast_math --expt-extended-lambda")
+		# We have to set SIMD flags globally because there seems to be a bug in FindCUDA which doesn't allow us to set per-file compilation flags.
+		# The implications is that users downloading the PyPi wheel package for the GPU, need to have a CPU with AVX2 support otherwise
+		# Aer will crash with: "Unknow instruction" exception.
+		# This will be fixed here: https://github.com/Qiskit/qiskit-aer/
+		if(CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "x86_64" OR CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "AMD64")
+			if(APPLE OR UNIX)
+				set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS}; --compiler-options;-mfma,-mavx2")
+			elseif(MSVC)
+				set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} /arch:AVX2")
+			endif()
+		endif()
 		set(AER_COMPILER_DEFINITIONS ${AER_COMPILER_DEFINITIONS} THRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_CUDA)
 		set(THRUST_DEPENDANT_LIBS "")
 	elseif(AER_THRUST_BACKEND STREQUAL "TBB")
@@ -237,12 +283,28 @@ if(SKBUILD) # Terra Addon build
 	add_subdirectory(qiskit/providers/aer/backends/wrappers)
 	add_subdirectory(src/open_pulse)
 else() # Standalone build
+
+	# We build SIMD filed separately, because they will be reached only if the
+	# machine running the code has SIMD support
+	if(CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "x86_64" OR CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "AMD64")
+		set(SIMD_SOURCE_FILE "${PROJECT_SOURCE_DIR}/src/simulators/statevector/qv_avx2.cpp")
+		if(APPLE OR UNIX)
+			set_source_files_properties(${SIMD_SOURCE_FILE} PROPERTIES COMPILE_FLAGS "-mfma -mavx2")
+		elseif(MSVC)
+			set_source_files_properties(${SIMD_SOURCE_FILE} PROPERTIES COMPILE_FLAGS "/arch:AVX2")
+		endif()
+	endif()
+
+	set(AER_SIMULATOR_SOURCES "${PROJECT_SOURCE_DIR}/contrib/standalone/qasm_simulator.cpp"
+		"${SIMD_SOURCE_FILE}")
+	set_source_files_properties(${AER_SIMULATOR_SOURCES} PROPERTIES CUDA_SOURCE_PROPERTY_FORMAT OBJ)
+
 	set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 	if(CUDA_FOUND)
-		cuda_add_executable(qasm_simulator ${AER_SIMULATOR_CPP_MAIN})
+		cuda_add_executable(qasm_simulator ${AER_SIMULATOR_SOURCES})
 		target_link_libraries(qasm_simulator ${AER_LIBRARIES})
 	else(CUDA_FOUND)
-		add_executable(qasm_simulator ${AER_SIMULATOR_CPP_MAIN})
+		add_executable(qasm_simulator ${AER_SIMULATOR_SOURCES})
 		target_link_libraries(qasm_simulator PRIVATE ${AER_LIBRARIES})
 	endif(CUDA_FOUND)
 	set_target_properties(qasm_simulator PROPERTIES

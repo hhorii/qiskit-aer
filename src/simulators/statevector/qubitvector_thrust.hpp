@@ -79,6 +79,7 @@ double mysecond()
 #define AER_CHUNK_BITS        21
 #define AER_MAX_BUFFERS       2
 
+namespace AER {
 namespace QV {
 
 // Type aliases
@@ -798,8 +799,6 @@ void QubitVectorChunkContainer<data_t>::SetupP2P(int nDev)
       for(i=0;i<nDev;i++){
         if(i != m_iDevice){
           cudaDeviceCanAccessPeer(&m_p2pEnable[i],m_iDevice,i);
-          if(m_p2pEnable[i])
-            cudaDeviceEnablePeerAccess(i,0);
         }
         else{
           m_p2pEnable[i] = 1;
@@ -4653,11 +4652,12 @@ double QubitVectorThrust<data_t>::expval_pauli(const reg_t &qubits,
 
 //------------------------------------------------------------------------------
 } // end namespace QV
+} // namespace AER
 //------------------------------------------------------------------------------
 
 // ostream overload for templated qubitvector
 template <typename data_t>
-inline std::ostream &operator<<(std::ostream &out, const QV::QubitVectorThrust<data_t>&qv) {
+inline std::ostream &operator<<(std::ostream &out, const AER::QV::QubitVectorThrust<data_t>&qv) {
 
   out << "[";
   size_t last = qv.size() - 1;
