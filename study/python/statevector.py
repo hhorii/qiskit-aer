@@ -18,12 +18,21 @@
 import numpy as np
 
 class StateVector():
-    def __init__(self, num_qubits):
+    def __init__(self, num_qubits, unitary_matrix=False):
         self.num_qubits = num_qubits;
         self.psi = np.zeros(2 ** self.num_qubits)
         self.psi[0] = 1
         self.psi = np.reshape(self.psi, self.num_qubits * [2])
         self.rng = np.random.RandomState()
+        
+        if unitary_matrix:
+            self.unitary_matrix = []
+            for i in range(2 ** num_qubits):
+                c = np.zeros(2 ** self.num_qubits)
+                c[i] = 1
+                self.unitary_matrix.append(np.reshape(c, self.num_qubits * [2]))
+        else:
+            self.unitary_matrix = None
 
     def random(self):
         return self.rng.rand()
@@ -45,6 +54,10 @@ class StateVector():
             else:
                 index += chr(ord('a') + i)
         self.psi = np.einsum(index, unitary, self.psi)
+        
+        if self.unitary_matrix is not None:
+            for i in range(2 ** self.num_qubits):
+                self.unitary_matrix[i] = np.einsum(index, unitary, self.unitary_matrix[i])
     
     def u3(self, n, theta, phi, lam):
         mat = np.array([[np.cos(theta / 2), -np.exp(1j * lam) * np.sin(theta / 2)],
@@ -113,13 +126,23 @@ class StateVector():
             else:
                 index += chr(ord('a') + i)
         self.psi = np.einsum(index, unitary, self.psi)
+        
+        if self.unitary_matrix is not None:
+            for i in range(2 ** self.num_qubits):
+                self.unitary_matrix[i] = np.einsum(index, unitary, self.unitary_matrix[i])
     
     def cnot (self, control, target):
         self.unitary_4x4(target, control, np.array([[[[1, 0], [0, 0]],
-                                               [[0, 1], [0, 0]]], 
-                                               [[[0, 0], [0, 1]], 
-                                               [[0, 0], [1, 0]]]]))
+                                                     [[0, 1], [0, 0]]], 
+                                                    [[[0, 0], [0, 1]], 
+                                                     [[0, 0], [1, 0]]]]))
     
+    def swap (self, control, target):
+        self.unitary_4x4(target, control, np.array([[[[0, 1], [0, 0]],
+                                                     [[1, 0], [0, 0]]], 
+                                                    [[[0, 0], [0, 1]], 
+                                                     [[0, 0], [1, 0]]]]))
+
     def measure(self, n):
         axis = list(range(self.num_qubits))
         axis.remove(self.num_qubits - 1 - n)
@@ -131,3 +154,13 @@ class StateVector():
         else:
             self.unitary_2x2(n, np.array([[0, 1 / np.sqrt(probabilities[1])], [0, 0]]))
             return 1
+    
+    def get_unitary_matrix(self):
+        if self.unitary_matrix is None:
+            return []
+        
+        ret = []
+        for i in range(2 ** self.num_qubits):
+            ret.append(np.reshape(self.unitary_matrix[i], 2 ** self.num_qubits))
+        
+        return ret
