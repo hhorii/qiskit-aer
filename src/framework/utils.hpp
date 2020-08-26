@@ -1563,22 +1563,6 @@ uint_t popcount(const uint_t count_) {
   return count;
 }
 
-template <typename V, typename T>
-int_t index_of(V& v, T& t, int_t first, int_t last) {
-  int_t mid = 0;
-  while (true) {
-    if (first >= last - 1) {
-      return first;
-      break;
-    }
-    mid = (first + last) / 2;
-    if (t <= v[mid])
-      last = mid;
-    else
-      first = mid;
-  }
-}
-
 //------------------------------------------------------------------------------
 } // end namespace Utils
 //------------------------------------------------------------------------------
