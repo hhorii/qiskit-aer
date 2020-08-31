@@ -96,6 +96,9 @@ Qobj::Qobj(const json_t &js) {
   using exp_params_t = std::vector<std::pair<pos_t, std::vector<double>>>;
   std::vector<exp_params_t> param_table;
   JSON::get_value(param_table, "parameterizations", config);
+  bool param_diff_use;
+  if (!JSON::get_value(param_diff_use, "parameterizations_diff_bindings", config))
+    param_diff_use = false;
 
   // Validate parameterizations for number of circuits
   if (!param_table.empty() && param_table.size() < num_circs) {
@@ -104,6 +107,7 @@ Qobj::Qobj(const json_t &js) {
   }
 
   const size_t num_exps = param_table.empty()? num_circs : param_table.size();
+  exp_params_t last_circ_params;
   // Load circuits
   for (size_t i=0; i<num_exps; i++) {
     // Get base circuit from qobj
@@ -113,12 +117,32 @@ Qobj::Qobj(const json_t &js) {
       circuits.push_back(circuit);
     } else {
       // Load different parameterizations of the initial circuit
-      const auto circ_params = param_table[i];
+      auto circ_params = param_table[i];
       const size_t num_params = circ_params[0].second.size();
       const size_t num_instr = circuit.ops.size();
       for (size_t j=0; j<num_params; j++) {
         // Make a copy of the initial circuit
         Circuit param_circuit = circuit;
+
+        if (param_diff_use) {
+          // Reuse last parameters
+          auto const current_circ_params = circ_params;
+          circ_params = last_circ_params;
+          // Replace last parameters with the current
+          for (const auto &current_circ_param : current_circ_params) {
+            bool found = false;
+            for (size_t j = 0; j < circ_params.size(); ++j) {
+              if (circ_params[j].first == current_circ_param.first) {
+                circ_params[j] = current_circ_param;
+                found = true;
+                break;
+              }
+            }
+            if (!found)
+              circ_params.push_back(current_circ_param);
+          }
+        }
+
         for (const auto &params : circ_params) {
           const auto instr_pos = params.first.first;
           const auto param_pos = params.first.second;
@@ -137,6 +161,9 @@ Qobj::Qobj(const json_t &js) {
           op.params[param_pos] = params.second[j];
         }
         circuits.push_back(param_circuit);
+
+        if (param_diff_use)
+          last_circ_params = circ_params;
       }
     }
   }
