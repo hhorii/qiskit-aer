@@ -121,6 +121,11 @@ public:
                                     const std::vector<Operations::Op> &ops)
                                     const = 0;
 
+  // Set available memory for this state
+  virtual void set_available_memory_mb(size_t memory_mb) {
+    available_memory_mb_ = memory_mb;
+  }
+
   //-----------------------------------------------------------------------
   // Optional: Load config settings
   //-----------------------------------------------------------------------
@@ -219,6 +224,10 @@ protected:
   // Set a global phase exp(1j * theta) for the state
   bool has_global_phase_ = false;
   complex_t global_phase_ = 1;
+
+  // Available memory for this state not including required_memory
+  size_t available_memory_mb_ = 0;
+
 };
 
 
@@ -309,6 +318,7 @@ void State<state_t>::add_creg_to_data(ExperimentData &data) const {
     data. add_pershot_register(creg_.register_hex());
   }
 }
+
 //-------------------------------------------------------------------------
 } // end namespace Base
 //-------------------------------------------------------------------------

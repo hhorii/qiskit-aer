@@ -541,11 +541,11 @@ QasmController::Method QasmController::simulation_method(
         if (simulation_precision_ == Precision::single_precision) {
           Statevector::State<QV::QubitVector<float>> state;
           validate_state(state, circ, noise_model, true);
-          validate_memory_requirements(state, circ, true);
+          configure_state_memory(state, circ, true);
         } else {
           Statevector::State<QV::QubitVector<double>> state;
           validate_state(state, circ, noise_model, true);
-          validate_memory_requirements(state, circ, true);
+          configure_state_memory(state, circ, true);
         }
       }
       return Method::statevector;
@@ -560,11 +560,11 @@ QasmController::Method QasmController::simulation_method(
         if (simulation_precision_ == Precision::single_precision) {
           Statevector::State<QV::QubitVectorThrust<float>> state;
           validate_state(state, circ, noise_model, true);
-          validate_memory_requirements(state, circ, true);
+          configure_state_memory(state, circ, true);
         } else {
           Statevector::State<QV::QubitVectorThrust<>> state;
           validate_state(state, circ, noise_model, true);
-          validate_memory_requirements(state, circ, true);
+          configure_state_memory(state, circ, true);
         }
       }
       return Method::statevector_thrust_gpu;
@@ -580,11 +580,11 @@ QasmController::Method QasmController::simulation_method(
         if (simulation_precision_ == Precision::single_precision) {
           Statevector::State<QV::QubitVectorThrust<float>> state;
           validate_state(state, circ, noise_model, true);
-          validate_memory_requirements(state, circ, true);
+          configure_state_memory(state, circ, true);
         } else {
           Statevector::State<QV::QubitVectorThrust<>> state;
           validate_state(state, circ, noise_model, true);
-          validate_memory_requirements(state, circ, true);
+          configure_state_memory(state, circ, true);
         }
       }
       return Method::statevector_thrust_cpu;
@@ -595,11 +595,11 @@ QasmController::Method QasmController::simulation_method(
         if (simulation_precision_ == Precision::single_precision) {
           DensityMatrix::State<QV::DensityMatrix<float>> state;
           validate_state(state, circ, noise_model, true);
-          validate_memory_requirements(state, circ, true);
+          configure_state_memory(state, circ, true);
         } else {
           DensityMatrix::State<QV::DensityMatrix<double>> state;
           validate_state(state, circ, noise_model, true);
-          validate_memory_requirements(state, circ, true);
+          configure_state_memory(state, circ, true);
         }
       }
       return Method::density_matrix;
@@ -614,11 +614,11 @@ QasmController::Method QasmController::simulation_method(
         if (simulation_precision_ == Precision::single_precision) {
           DensityMatrix::State<QV::DensityMatrixThrust<float>> state;
           validate_state(state, circ, noise_model, true);
-          validate_memory_requirements(state, circ, true);
+          configure_state_memory(state, circ, true);
         } else {
           DensityMatrix::State<QV::DensityMatrixThrust<double>> state;
           validate_state(state, circ, noise_model, true);
-          validate_memory_requirements(state, circ, true);
+          configure_state_memory(state, circ, true);
         }
       }
       return Method::density_matrix_thrust_gpu;
@@ -635,11 +635,11 @@ QasmController::Method QasmController::simulation_method(
         if (simulation_precision_ == Precision::single_precision) {
           DensityMatrix::State<QV::DensityMatrixThrust<float>> state;
           validate_state(state, circ, noise_model, true);
-          validate_memory_requirements(state, circ, true);
+          configure_state_memory(state, circ, true);
         } else {
           DensityMatrix::State<QV::DensityMatrixThrust<double>> state;
           validate_state(state, circ, noise_model, true);
-          validate_memory_requirements(state, circ, true);
+          configure_state_memory(state, circ, true);
         }
       }
       return Method::density_matrix_thrust_cpu;
@@ -648,8 +648,8 @@ QasmController::Method QasmController::simulation_method(
     case Method::stabilizer: {
       if (validate) {
         Stabilizer::State state;
-        validate_state(Stabilizer::State(), circ, noise_model, true);
-        validate_memory_requirements(state, circ, true);
+        validate_state(state, circ, noise_model, true);
+        configure_state_memory(state, circ, true);
       }
       return Method::stabilizer;
     }
@@ -657,7 +657,7 @@ QasmController::Method QasmController::simulation_method(
       if (validate) {
         ExtendedStabilizer::State state;
         validate_state(state, circ, noise_model, true);
-        validate_memory_requirements(ExtendedStabilizer::State(), circ, true);
+        configure_state_memory(state, circ, true);
       }
       return Method::extended_stabilizer;
     }
@@ -665,7 +665,7 @@ QasmController::Method QasmController::simulation_method(
       if (validate) {
         MatrixProductState::State state;
         validate_state(state, circ, noise_model, true);
-        validate_memory_requirements(state, circ, true);
+        configure_state_memory(state, circ, true);
       }
       return Method::matrix_product_state;
     }
@@ -679,10 +679,11 @@ QasmController::Method QasmController::simulation_method(
       // a single shot of the density matrix simulator is approx 2 ** nq
       // times slower than a single shot of statevector due the increased
       // dimension
+      DensityMatrix::State<> state;
       if (noise_model.has_quantum_errors() &&
           circ.shots > (1ULL << circ.num_qubits) &&
-          validate_memory_requirements(DensityMatrix::State<>(), circ, false) &&
-          validate_state(DensityMatrix::State<>(), circ, noise_model, false) &&
+          validate_state(state, circ, noise_model, false) &&
+          configure_state_memory(state, circ, false) &&
           check_measure_sampling_opt(circ, Method::density_matrix)) {
         return Method::density_matrix;
       }
@@ -693,10 +694,10 @@ QasmController::Method QasmController::simulation_method(
       bool enough_memory = true;
       if (simulation_precision_ == Precision::single_precision) {
         Statevector::State<QV::QubitVector<float>> sv_state;
-        enough_memory = validate_memory_requirements(sv_state, circ, false);
+        enough_memory = configure_state_memory(sv_state, circ, false);
       } else {
         Statevector::State<> sv_state;
-        enough_memory = validate_memory_requirements(sv_state, circ, false);
+        enough_memory = configure_state_memory(sv_state, circ, false);
       }
       if (!enough_memory) {
         throw std::runtime_error(
@@ -864,7 +865,7 @@ void QasmController::run_circuit_helper(const Circuit& circ,
   State_t state;
 
   // Check memory requirements, raise exception if they're exceeded
-  validate_memory_requirements(state, circ, true);
+  configure_state_memory(state, circ, true);
 
   // Set state config
   state.set_config(config);

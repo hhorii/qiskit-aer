@@ -1099,8 +1099,8 @@ public:
   // Set the sample_measure index size
   void set_sample_measure_index_size(int n) {sample_measure_index_size_ = n;}
 
-  // Get the sample_measure index size
-  int get_sample_measure_index_size() {return sample_measure_index_size_;}
+  // Set the sample_measure index memory mb
+  void set_sample_measure_index_memory_mb(size_t memory_mb) {};
 
   void set_simd_enable(bool simd_enable) {}
 
@@ -2319,7 +2319,6 @@ template <typename data_t>
 void QubitVectorThrust<data_t>::set_json_chop_threshold(double threshold) {
   json_chop_threshold_ = threshold;
 }
-
 
 /*******************************************************************************
  *

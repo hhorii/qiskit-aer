@@ -262,7 +262,7 @@ void UnitaryController::run_circuit_helper(
   validate_state(state, circ, noise, true);
 
   // Validate memory requirements and throw exception if not enough memory
-  validate_memory_requirements(state, circ, true);
+  configure_state_memory(state, circ, true);
 
   // Check for custom initial state, and if so check it matches num qubits
   if (!initial_unitary_.empty()) {

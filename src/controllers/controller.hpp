@@ -163,7 +163,7 @@ protected:
   // Otherwise return false.
   // If throw_except is true an exception will be thrown directly.
   template <class state_t>
-  bool validate_memory_requirements(const state_t &state, const Circuit &circ,
+  bool configure_state_memory(state_t &state, const Circuit &circ,
                                     bool throw_except = false) const;
 
   //-----------------------------------------------------------------------
@@ -209,6 +209,7 @@ protected:
   int max_parallel_experiments_;
   int max_parallel_shots_;
   size_t max_memory_mb_;
+  size_t available_state_memory_mb_;
 
   // use explicit parallelization
   bool explicit_parallelization_;
@@ -257,6 +258,7 @@ void Controller::set_config(const json_t &config) {
 
   if (JSON::check_key("max_memory_mb", config)) {
     JSON::get_value(max_memory_mb_, "max_memory_mb", config);
+    available_state_memory_mb_ = max_memory_mb_;
   }
 
   // for debugging
@@ -339,6 +341,7 @@ void Controller::set_parallelization_experiments(
   parallel_experiments_ =
       std::min<int>({parallel_experiments_, max_experiments,
                      max_parallel_threads_, static_cast<int>(circuits.size())});
+  available_state_memory_mb_ = max_memory_mb_ / parallel_experiments_;
 }
 
 void Controller::set_parallelization_circuit(const Circuit &circ,
@@ -428,14 +431,14 @@ bool Controller::validate_state(const state_t &state, const Circuit &circ,
 }
 
 template <class state_t>
-bool Controller::validate_memory_requirements(const state_t &state,
-                                              const Circuit &circ,
-                                              bool throw_except) const {
+bool Controller::configure_state_memory(state_t &state,
+                                        const Circuit &circ,
+                                        bool throw_except) const {
   if (max_memory_mb_ == 0)
     return true;
 
   size_t required_mb = state.required_memory_mb(circ.num_qubits, circ.ops);
-  if (max_memory_mb_ < required_mb) {
+  if (available_state_memory_mb_ < required_mb) {
     if (throw_except) {
       std::string name = "";
       JSON::get_value(name, "name", circ.header);
@@ -444,6 +447,7 @@ bool Controller::validate_memory_requirements(const state_t &state,
     }
     return false;
   }
+  state.set_available_memory_mb(available_state_memory_mb_ - required_mb);
   return true;
 }
 

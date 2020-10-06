@@ -1077,7 +1077,8 @@ std::string bin2hex(std::string str, bool prefix) {
     }
     // Add any additional chunks
     for (size_t j=1; j < chunks; ++j) {
-      std::stringstream ss; // clear string stream
+      std::stringstream ss;
+      ss = std::stringstream(); // clear string stream
       ss << std::hex << std::stoull(str.substr(remain + j * bin_block, bin_block), nullptr, 2);
       part = ss.str();
       part.insert(0, hex_block - part.size(), '0');
@@ -1131,7 +1132,6 @@ uint_t popcount(const uint_t count_) {
   count = (count & 0x00000000ffffffff) + ((count >> 32) & 0x00000000ffffffff);
   return count;
 }
-
 
 //------------------------------------------------------------------------------
 } // end namespace Utils
