@@ -27,7 +27,7 @@ namespace Transpile {
 class DiagonalFusion {
 public:
   DiagonalFusion(std::shared_ptr<FusionMethod> method_ = std::make_shared<FusionMethod>())
-    : method(method_), max_qubit(method_->get_default_max_qubit() * 2), threshold(method_->get_default_threshold_qubit() + 5), active(method_->support_diagonal()) { }
+    : method(method_), max_qubit(method_->get_default_max_qubit() * 2), threshold(method_->get_default_threshold_qubit() + 10), active(method_->support_diagonal()) { }
 
   virtual ~DiagonalFusion() {}
 
