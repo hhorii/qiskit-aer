@@ -37,7 +37,7 @@ public:
 
   void set_config(const json_t &config);
 
-  std::string name() const { return "two_qubit_fusion"; };
+  std::string name() const { return "n_qubit_fusion"; };
 
   uint_t get_threshold() const { return threshold; }
 
