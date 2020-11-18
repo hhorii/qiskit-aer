@@ -241,17 +241,6 @@ class AerBackend(BaseBackend, ABC):
         run_qobj = self._format_qobj(qobj, backend_options=backend_options,
                                      noise_model=noise_model)
 
-        if backend_options is not None and 'qobj_save_dir' in backend_options:
-            save_dir = backend_options['qobj_save_dir']
-            import os
-            if os.path.isdir(save_dir):
-                file_path = os.path.join(save_dir, datetime.datetime.now().isoformat() + job_id + ".qobj")
-                with open(file_path, mode='w') as qobj_file:
-                    qobj_file.write(json.dumps(formatted_qobj, cls=AerJSONEncoder))
-            else:
-                logger.warning(
-                    "WARNING: qobj_save_dir in backend options %s is not a directory", save_dir)
-
         return self._run(run_qobj, job_id)
 
     def _run(self, qobj, job_id=''):

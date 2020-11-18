@@ -361,6 +361,36 @@ class QasmSimulator(AerBackend):
         Returns:
             dict: return a dictionary of results.
         """
+        if hasattr(qobj.config, 'qobj_save_dir'):
+            save_dir = qobj.config.qobj_save_dir
+            import os
+            import datetime
+            import json
+            from numpy import ndarray
+            class AerJSONEncoder(json.JSONEncoder):
+                """
+                JSON encoder for NumPy arrays and complex numbers.
+
+                This functions as the standard JSON Encoder but adds support
+                for encoding:
+                    complex numbers z as lists [z.real, z.imag]
+                    ndarrays as nested lists.
+                """
+                def default(self, obj):
+                    if isinstance(obj, ndarray):
+                        return obj.tolist()
+                    if isinstance(obj, complex):
+                        return [obj.real, obj.imag]
+                    if hasattr(obj, "to_dict"):
+                        return obj.to_dict()
+                    return super().default(obj)
+            if os.path.isdir(save_dir):
+                file_path = os.path.join(save_dir, datetime.datetime.now().isoformat() + qobj.qobj_id + ".qobj")
+                with open(file_path, mode='w') as qobj_file:
+                    qobj_file.write(json.dumps(qobj, cls=AerJSONEncoder))
+            else:
+                logger.warning(
+                    "WARNING: qobj_save_dir in backend options %s is not a directory", save_dir)
         return cpp_execute(self._controller, qobj)
 
     def _set_option(self, key, value):
