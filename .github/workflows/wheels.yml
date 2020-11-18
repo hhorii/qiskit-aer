@@ -40,6 +40,29 @@ jobs:
         run : |
           pip install -U twine
           twine upload wheelhouse/*
+  sdist:
+    name: Publish qiskit-aer sdist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/setup-python@v2
+        name: Install Python
+        with:
+          python-version: '3.8'
+      - name: Install Deps
+        run: pip install -U twine wheel
+      - name: Build Artifacts
+        run: |
+          python setup.py sdist
+        shell: bash
+      - uses: actions/upload-artifact@v2
+        with:
+          path: ./dist/qiskit*
+      - name: Publish to PyPi
+        env:
+          TWINE_PASSWORD: ${{ secrets.TWINE_PASSWORD }}
+          TWINE_USERNAME: qiskit
+        run: twine upload dist/qiskit*
   gpu-build:
     name: Build qiskit-aer-gpu wheels
     runs-on: ubuntu-latest
@@ -59,7 +82,7 @@ jobs:
           CIBW_SKIP: "cp27-* cp34-* cp35-* *-manylinux_i686 pp*"
           CIBW_MANYLINUX_X86_64_IMAGE: "manylinux2010"
           CIBW_MANYLINUX_I686_IMAGE: "manylinux2010"
-          CIBW_ENVIRONMENT: QISKIT_AER_PACKAGE_NAME=qiskit-aer-gpu AER_THRUST_BACKEND=CUDA
+          CIBW_ENVIRONMENT: QISKIT_AER_PACKAGE_NAME=qiskit-aer-gpu AER_THRUST_BACKEND=CUDA CUDACXX=/usr/local/cuda/bin/nvcc
           CIBW_TEST_COMMAND: "python3 {project}/tools/verify_wheels.py"
           CIBW_TEST_REQUIRES: "git+https://github.com/Qiskit/qiskit-terra.git"
         run: |
