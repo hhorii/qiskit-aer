@@ -143,14 +143,23 @@ class AerBackend(BaseBackend, ABC):
                 DeprecationWarning,
                 stacklevel=3)
 
+        # Submit job
+        if True:
+            job_id = str(uuid.uuid4())
+            aer_job = AerJob(self, job_id, self._run_job_old, qobj)
+            #aer_job = AerJob(self, job_id, self._run_job, qobj,
+            #                 backend_options, noise_model, validate)
+            aer_job.submit()
+            return aer_job
+
         # Add backend options to the Job qobj
         qobj = self._format_qobj(
             qobj, backend_options=backend_options, **run_options)
-
+ 
         # Optional validation
         if validate:
             self._validate(qobj)
-
+ 
         # Submit job
         job_id = str(uuid.uuid4())
         aer_job = AerJob(self, job_id, self._run, qobj)
@@ -222,6 +231,22 @@ class AerBackend(BaseBackend, ABC):
             operational=True,
             pending_jobs=0,
             status_msg='')
+
+    def _run_job_old(self, qobj, job_id):
+        """Run a qobj job"""
+        start = time.time()
+        output = self._controller(self._format_qobj_old(qobj, None, None))
+        end = time.time()
+        return Result.from_dict(self._format_results_old(job_id, output, end - start))
+
+    def _format_results_old(self, job_id, output, time_taken):
+        """Construct Result object from simulator output."""
+        output["job_id"] = job_id
+        output["date"] = datetime.datetime.now().isoformat()
+        output["backend_name"] = self.name()
+        output["backend_version"] = self.configuration().backend_version
+        output["time_taken"] = time_taken
+        return output
 
     def _run_job(self, job_id, qobj, backend_options, noise_model, validate):
         """Run a qobj job"""
@@ -346,6 +371,33 @@ class AerBackend(BaseBackend, ABC):
         if self._custom_defaults is None:
             self._custom_defaults = copy.copy(self._defaults)
         setattr(self._custom_defaults, key, value)
+
+    def _format_qobj_old(self, qobj, backend_options, noise_model):
+        """Format qobj string for qiskit aer controller"""
+        # Convert qobj to dict so as to avoid editing original
+        output = qobj.to_dict()
+        # Add new parameters to config from backend options
+        config = output["config"]
+        if backend_options is not None:
+            for key, val in backend_options.items():
+                config[key] = val if not hasattr(val, 'to_dict') else val.to_dict()
+        # Add noise model to config
+        if noise_model is not None:
+            config["noise_model"] = noise_model
+
+        # Add runtime config
+        if 'library_dir' not in config:
+            import os
+            from qiskit.util import local_hardware_info
+            LIBRARY_DIR = os.path.dirname(__file__)
+            config['library_dir'] = LIBRARY_DIR
+        if "max_memory_mb" not in config:
+            max_memory_mb = int(local_hardware_info()['memory'] * 1024 / 2)
+            config['max_memory_mb'] = max_memory_mb
+
+        #self._validate_config(config)
+        # Return output
+        return output
 
     def _format_qobj(self, qobj,
                      backend_options=None,  # DEPRECATED
