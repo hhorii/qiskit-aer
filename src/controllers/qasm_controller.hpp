@@ -511,6 +511,7 @@ void QasmController::run_circuit(const Circuit& circ,
           circ, noise, config, shots, rng_seed, Clifford::Clifford(),
           Method::stabilizer, data);
       case Method::extended_stabilizer:
+        throw std::runtime_error("TEST");
         return run_circuit_helper<ExtendedStabilizer::State>(
             circ, noise, config, shots, rng_seed, CHSimulator::Runner(),
             Method::extended_stabilizer, data);
@@ -654,6 +655,7 @@ QasmController::Method QasmController::simulation_method(
       return Method::stabilizer;
     }
     case Method::extended_stabilizer: {
+      throw std::runtime_error("TEST");
       if (validate) {
         ExtendedStabilizer::State state;
         validate_state(state, circ, noise_model, true);
@@ -767,6 +769,7 @@ size_t QasmController::required_memory_mb(
       return state.required_memory_mb(circ.num_qubits, circ.ops);
     }
     case Method::extended_stabilizer: {
+      throw std::runtime_error("TEST");
       ExtendedStabilizer::State state;
       return state.required_memory_mb(circ.num_qubits, circ.ops);
     }

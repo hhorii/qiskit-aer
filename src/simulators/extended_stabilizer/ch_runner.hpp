@@ -147,7 +147,6 @@ Runner::Runner(uint_t num_qubits)
 
 void Runner::initialize(uint_t num_qubits)
 {
-  throw std::runtime_error("TEST");
   states_.clear();
   coefficients_.clear();
   n_qubits_ = num_qubits;
