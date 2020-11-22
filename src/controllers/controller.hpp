@@ -246,7 +246,6 @@ void Controller::set_config(const json_t &config) {
   max_parallel_threads_ = (max_parallel_threads_ > 0)
                               ? std::min(max_parallel_threads_, omp_threads)
                               : std::max(1, omp_threads);
-  std::cout << "max_parallel_threads_: " << max_parallel_threads_ << std::endl;
 #else
   // No OpenMP so we disable parallelization
   max_parallel_threads_ = 1;
@@ -375,10 +374,6 @@ void Controller::set_parallelization_circuit(const Circuit &circ,
       (parallel_shots_ > 1)
           ? std::max<int>({1, max_parallel_threads_ / parallel_shots_})
           : std::max<int>({1, max_parallel_threads_ / parallel_experiments_});
-
-  std::cout << "parallel_shots_: " << parallel_shots_ << std::endl;
-  std::cout << "parallel_state_update_: " << parallel_state_update_ << std::endl;
-  std::cout << "max_parallel_threads_: " << max_parallel_threads_ << std::endl;
 }
 
 size_t Controller::get_system_memory_mb() {
