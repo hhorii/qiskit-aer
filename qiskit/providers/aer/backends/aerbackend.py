@@ -395,9 +395,25 @@ class AerBackend(BaseBackend, ABC):
             max_memory_mb = int(local_hardware_info()['memory'] * 1024 / 2)
             config['max_memory_mb'] = max_memory_mb
 
-        #self._validate_config(config)
+        self._validate_config(config)
         # Return output
         return output
+
+    def _validate_config(self, config):
+        # sanity checks on config- should be removed upon fixing of assemble w.r.t. backend_options
+        if 'backend_options' in config:
+            if isinstance(config['backend_options'], dict):
+                for key, val in config['backend_options'].items():
+                    if hasattr(val, 'to_dict'):
+                        config['backend_options'][key] = val.to_dict()
+            elif not isinstance(config['backend_options'], list):
+                raise ValueError("config[backend_options] must be a dict or list!")
+        # Double-check noise_model is a dict type
+        if 'noise_model' in config and not isinstance(config["noise_model"], dict):
+            if hasattr(config["noise_model"], 'to_dict'):
+                config["noise_model"] = config["noise_model"].to_dict()
+            else:
+                raise ValueError("noise_model must be a dict : " + str(type(config["noise_model"])))
 
     def _format_qobj(self, qobj,
                      backend_options=None,  # DEPRECATED
