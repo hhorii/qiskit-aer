@@ -319,6 +319,7 @@ bool State::check_measurement_opt(const std::vector<Operations::Op> &ops) const
 void State::apply_ops(const std::vector<Operations::Op> &ops, ExperimentData &data,
                          RngEngine &rng, bool final_ops)
 {
+  throw std::runtime_error("TEST");
   std::pair<bool, size_t> stabilizer_opts = check_stabilizer_opt(ops);
   bool is_stabilizer = stabilizer_opts.first;
   if(is_stabilizer)
