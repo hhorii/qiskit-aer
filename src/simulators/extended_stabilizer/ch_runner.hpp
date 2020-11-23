@@ -142,6 +142,7 @@ public:
 
 Runner::Runner(uint_t num_qubits)
 {
+  throw std::runtime_error("TEST");
   initialize(num_qubits);
 }
 
