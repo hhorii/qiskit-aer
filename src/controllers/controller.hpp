@@ -531,11 +531,6 @@ Result Controller::execute(std::vector<Circuit> &circuits,
         execute_circuit(circuits[j], circ_noise_model, config, result.results[j]);
       }
     } else {
-      std::string method;
-      if (JSON::get_value(method, "method", config)) {
-        if (method == "extended_stabilizer")
-          throw std::runtime_error("TEST");
-      }
       for (int j = 0; j < result.results.size(); ++j) {
         // Make a copy of the noise model for each circuit execution
         // so that it can be modified if required
@@ -607,6 +602,11 @@ void Controller::execute_circuit(Circuit &circ,
       set_parallelization_circuit(circ, noise);
     }
 
+    std::string method;
+    if (JSON::get_value(method, "method", config)) {
+      if (method == "extended_stabilizer")
+        throw std::runtime_error("TEST");
+    }
     // Single shot thread execution
     if (parallel_shots_ <= 1) {
       run_circuit(circ, noise, config, circ.shots, circ.seed, exp_result.data);
