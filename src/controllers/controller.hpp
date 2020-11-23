@@ -531,6 +531,11 @@ Result Controller::execute(std::vector<Circuit> &circuits,
         execute_circuit(circuits[j], circ_noise_model, config, result.results[j]);
       }
     } else {
+      std::string method;
+      if (JSON::get_value(method, "method", config)) {
+        if (method == "extended_stabilizer")
+          throw std::runtime_error("TEST");
+      }
       for (int j = 0; j < result.results.size(); ++j) {
         // Make a copy of the noise model for each circuit execution
         // so that it can be modified if required
@@ -538,12 +543,6 @@ Result Controller::execute(std::vector<Circuit> &circuits,
         execute_circuit(circuits[j], circ_noise_model, config, result.results[j]);
       }
     }
-    std::string method;
-    if (JSON::get_value(method, "method", config)) {
-      if (method == "extended_stabilizer")
-        throw std::runtime_error("TEST");
-    }
-
 
     // Check each experiment result for completed status.
     // If only some experiments completed return partial completed status.
