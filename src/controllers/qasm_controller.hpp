@@ -654,11 +654,11 @@ QasmController::Method QasmController::simulation_method(
       return Method::stabilizer;
     }
     case Method::extended_stabilizer: {
-//      if (validate) {
-//        ExtendedStabilizer::State state;
-//        validate_state(state, circ, noise_model, true);
-//        validate_memory_requirements(ExtendedStabilizer::State(), circ, true);
-//      }
+      if (validate) {
+        ExtendedStabilizer::State state;
+        validate_state(state, circ, noise_model, true);
+        validate_memory_requirements(ExtendedStabilizer::State(), circ, true);
+      }
       return Method::extended_stabilizer;
     }
     case Method::matrix_product_state: {
@@ -767,9 +767,9 @@ size_t QasmController::required_memory_mb(
       return state.required_memory_mb(circ.num_qubits, circ.ops);
     }
     case Method::extended_stabilizer: {
-//      ExtendedStabilizer::State state;
-//      return state.required_memory_mb(circ.num_qubits, circ.ops);
-      return 1;
+      ExtendedStabilizer::State state;
+      throw std::runtime_error("TEST");
+      return state.required_memory_mb(circ.num_qubits, circ.ops);
     }
     case Method::matrix_product_state: {
       MatrixProductState::State state;
