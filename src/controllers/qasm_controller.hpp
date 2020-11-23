@@ -767,7 +767,6 @@ size_t QasmController::required_memory_mb(
       return state.required_memory_mb(circ.num_qubits, circ.ops);
     }
     case Method::extended_stabilizer: {
-      throw std::runtime_error("TEST");
       ExtendedStabilizer::State state;
       return state.required_memory_mb(circ.num_qubits, circ.ops);
     }
