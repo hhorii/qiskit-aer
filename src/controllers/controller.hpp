@@ -617,10 +617,15 @@ void Controller::execute_circuit(Circuit &circ,
         subshots[j] += 1;
       }
 
+//      std::string method;
+//      if (JSON::get_value(method, "method", config)) {
+//        if (method == "extended_stabilizer")
+//          throw std::runtime_error("TEST");
+//      }
       // Vector to store parallel thread output data
       std::vector<ExperimentData> par_data(parallel_shots_);
       std::vector<std::string> error_msgs(parallel_shots_);
-#pragma omp parallel for if (parallel_shots_ > 1) num_threads(parallel_shots_)
+//#pragma omp parallel for if (parallel_shots_ > 1) num_threads(parallel_shots_)
       for (int i = 0; i < parallel_shots_; i++) {
         try {
           run_circuit(circ, noise, config, subshots[i], circ.seed + i,
@@ -661,11 +666,6 @@ void Controller::execute_circuit(Circuit &circ,
     double time_taken =
         std::chrono::duration<double>(timer_stop - timer_start).count();
     exp_result.time_taken = time_taken;
-    std::string method;
-    if (JSON::get_value(method, "method", config)) {
-      if (method == "extended_stabilizer")
-        throw std::runtime_error("TEST");
-    }
   }
   // If an exception occurs during execution, catch it and pass it to the output
   catch (std::exception &e) {
