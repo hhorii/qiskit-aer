@@ -617,6 +617,11 @@ void Controller::execute_circuit(Circuit &circ,
         subshots[j] += 1;
       }
 
+      std::string method;
+      if (JSON::get_value(method, "method", config)) {
+        if (method == "extended_stabilizer")
+          throw std::runtime_error("TEST");
+      }
       // Vector to store parallel thread output data
       std::vector<ExperimentData> par_data(parallel_shots_);
       std::vector<std::string> error_msgs(parallel_shots_);
@@ -639,11 +644,6 @@ void Controller::execute_circuit(Circuit &circ,
       for (auto &datum : par_data) {
         exp_result.data.combine(std::move(datum));
       }
-    }
-    std::string method;
-    if (JSON::get_value(method, "method", config)) {
-      if (method == "extended_stabilizer")
-        throw std::runtime_error("TEST");
     }
     // Report success
     exp_result.status = ExperimentResult::Status::completed;
