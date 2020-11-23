@@ -516,13 +516,15 @@ Result Controller::execute(std::vector<Circuit> &circuits,
     result.metadata["parallel_experiments"] = parallel_experiments_;
     result.metadata["max_memory_mb"] = max_memory_mb_;
 
-#ifdef _OPENMP
-    if (parallel_shots_ > 1 || parallel_state_update_ > 1)
-      omp_set_nested(1);
-#endif
     // then- and else-blocks have intentionally duplication.
     // Nested omp has significant overheads even though a guard condition exists.
     if (parallel_experiments_ > 1) {
+#ifdef _OPENMP
+      if (parallel_shots_ > 1 || parallel_state_update_ > 1)
+        omp_set_nested(1);
+      else
+        omp_set_nested(0);
+#endif
       #pragma omp parallel for num_threads(parallel_experiments_)
       for (int j = 0; j < result.results.size(); ++j) {
         // Make a copy of the noise model for each circuit execution
@@ -607,6 +609,12 @@ void Controller::execute_circuit(Circuit &circ,
       run_circuit(circ, noise, config, circ.shots, circ.seed, exp_result.data);
       // Parallel shot thread execution
     } else {
+#ifdef _OPENMP
+      if (parallel_experiments_ > 1 && parallel_shots_ > 1)
+        omp_set_nested(1);
+      else
+        omp_set_nested(0);
+#endif
       // Calculate shots per thread
       std::vector<unsigned int> subshots;
       for (int j = 0; j < parallel_shots_; ++j) {
@@ -617,15 +625,10 @@ void Controller::execute_circuit(Circuit &circ,
         subshots[j] += 1;
       }
 
-//      std::string method;
-//      if (JSON::get_value(method, "method", config)) {
-//        if (method == "extended_stabilizer")
-//          throw std::runtime_error("TEST");
-//      }
       // Vector to store parallel thread output data
       std::vector<ExperimentData> par_data(parallel_shots_);
       std::vector<std::string> error_msgs(parallel_shots_);
-//#pragma omp parallel for if (parallel_shots_ > 1) num_threads(parallel_shots_)
+#pragma omp parallel for if (parallel_shots_ > 1) num_threads(parallel_shots_)
       for (int i = 0; i < parallel_shots_; i++) {
         try {
           run_circuit(circ, noise, config, subshots[i], circ.seed + i,
