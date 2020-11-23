@@ -508,6 +508,12 @@ Result Controller::execute(std::vector<Circuit> &circuits,
       set_parallelization_experiments(circuits, noise_model);
     }
 
+    std::string method;
+    if (JSON::get_value(method, "method", config)) {
+      if (method == "extended_stabilizer")
+        throw std::runtime_error("TEST");
+    }
+
 #ifdef _OPENMP
     result.metadata["omp_enabled"] = true;
 #else

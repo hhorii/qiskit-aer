@@ -549,8 +549,6 @@ void QasmController::run_circuit(const Circuit& circ,
           circ, noise, config, shots, rng_seed, Clifford::Clifford(),
           Method::stabilizer, data);
       case Method::extended_stabilizer:
-        backtrace();
-        throw std::runtime_error("TEST");
         return run_circuit_helper<ExtendedStabilizer::State>(
             circ, noise, config, shots, rng_seed, CHSimulator::Runner(),
             Method::extended_stabilizer, data);
