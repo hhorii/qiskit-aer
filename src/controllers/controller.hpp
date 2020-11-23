@@ -602,11 +602,6 @@ void Controller::execute_circuit(Circuit &circ,
       set_parallelization_circuit(circ, noise);
     }
 
-    std::string method;
-    if (JSON::get_value(method, "method", config)) {
-      if (method == "extended_stabilizer")
-        throw std::runtime_error("TEST");
-    }
     // Single shot thread execution
     if (parallel_shots_ <= 1) {
       run_circuit(circ, noise, config, circ.shots, circ.seed, exp_result.data);
@@ -644,6 +639,11 @@ void Controller::execute_circuit(Circuit &circ,
       for (auto &datum : par_data) {
         exp_result.data.combine(std::move(datum));
       }
+    }
+    std::string method;
+    if (JSON::get_value(method, "method", config)) {
+      if (method == "extended_stabilizer")
+        throw std::runtime_error("TEST");
     }
     // Report success
     exp_result.status = ExperimentResult::Status::completed;
