@@ -520,12 +520,6 @@ Result Controller::execute(std::vector<Circuit> &circuits,
     if (parallel_shots_ > 1 || parallel_state_update_ > 1)
       omp_set_nested(1);
 #endif
-    std::string method;
-    if (JSON::get_value(method, "method", config)) {
-      if (method == "extended_stabilizer")
-        throw std::runtime_error("TEST");
-    }
-
     // then- and else-blocks have intentionally duplication.
     // Nested omp has significant overheads even though a guard condition exists.
     if (parallel_experiments_ > 1) {
@@ -544,6 +538,12 @@ Result Controller::execute(std::vector<Circuit> &circuits,
         execute_circuit(circuits[j], circ_noise_model, config, result.results[j]);
       }
     }
+    std::string method;
+    if (JSON::get_value(method, "method", config)) {
+      if (method == "extended_stabilizer")
+        throw std::runtime_error("TEST");
+    }
+
 
     // Check each experiment result for completed status.
     // If only some experiments completed return partial completed status.
