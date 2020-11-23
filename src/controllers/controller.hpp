@@ -606,11 +606,14 @@ void Controller::execute_circuit(Circuit &circ,
 
     // Single shot thread execution
     if (parallel_shots_ <= 1) {
+#ifdef _OPENMP
+      omp_set_nested(0);
+#endif
       run_circuit(circ, noise, config, circ.shots, circ.seed, exp_result.data);
       // Parallel shot thread execution
     } else {
 #ifdef _OPENMP
-      if (parallel_experiments_ == 1 && parallel_shots_ > 1)
+      if (parallel_experiments_ == 1)
         omp_set_nested(1);
       else
         omp_set_nested(0);
@@ -628,7 +631,7 @@ void Controller::execute_circuit(Circuit &circ,
       // Vector to store parallel thread output data
       std::vector<ExperimentData> par_data(parallel_shots_);
       std::vector<std::string> error_msgs(parallel_shots_);
-//#pragma omp parallel for if (parallel_shots_ > 1) num_threads(parallel_shots_)
+#pragma omp parallel for if (parallel_shots_ > 1) num_threads(parallel_shots_)
       for (int i = 0; i < parallel_shots_; i++) {
         try {
           run_circuit(circ, noise, config, subshots[i], circ.seed + i,
