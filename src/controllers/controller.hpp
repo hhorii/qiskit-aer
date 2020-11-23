@@ -628,7 +628,7 @@ void Controller::execute_circuit(Circuit &circ,
       // Vector to store parallel thread output data
       std::vector<ExperimentData> par_data(parallel_shots_);
       std::vector<std::string> error_msgs(parallel_shots_);
-#pragma omp parallel for if (parallel_shots_ > 1) num_threads(parallel_shots_)
+//#pragma omp parallel for if (parallel_shots_ > 1) num_threads(parallel_shots_)
       for (int i = 0; i < parallel_shots_; i++) {
         try {
           run_circuit(circ, noise, config, subshots[i], circ.seed + i,
