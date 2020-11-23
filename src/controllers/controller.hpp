@@ -610,7 +610,7 @@ void Controller::execute_circuit(Circuit &circ,
       // Parallel shot thread execution
     } else {
 #ifdef _OPENMP
-      if (parallel_experiments_ > 1 && parallel_shots_ > 1)
+      if (parallel_experiments_ == 1 && parallel_shots_ > 1)
         omp_set_nested(1);
       else
         omp_set_nested(0);
