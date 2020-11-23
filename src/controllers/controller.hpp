@@ -508,12 +508,6 @@ Result Controller::execute(std::vector<Circuit> &circuits,
       set_parallelization_experiments(circuits, noise_model);
     }
 
-    std::string method;
-    if (JSON::get_value(method, "method", config)) {
-      if (method == "extended_stabilizer")
-        throw std::runtime_error("TEST");
-    }
-
 #ifdef _OPENMP
     result.metadata["omp_enabled"] = true;
 #else
@@ -526,6 +520,12 @@ Result Controller::execute(std::vector<Circuit> &circuits,
     if (parallel_shots_ > 1 || parallel_state_update_ > 1)
       omp_set_nested(1);
 #endif
+    std::string method;
+    if (JSON::get_value(method, "method", config)) {
+      if (method == "extended_stabilizer")
+        throw std::runtime_error("TEST");
+    }
+
     // then- and else-blocks have intentionally duplication.
     // Nested omp has significant overheads even though a guard condition exists.
     if (parallel_experiments_ > 1) {
