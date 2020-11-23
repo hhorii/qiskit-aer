@@ -607,7 +607,8 @@ void Controller::execute_circuit(Circuit &circ,
     // Single shot thread execution
     if (parallel_shots_ <= 1) {
 #ifdef _OPENMP
-      omp_set_nested(0);
+      if (parallel_experiments_ == 1)
+        omp_set_nested(0);
 #endif
       run_circuit(circ, noise, config, circ.shots, circ.seed, exp_result.data);
       // Parallel shot thread execution
@@ -615,8 +616,6 @@ void Controller::execute_circuit(Circuit &circ,
 #ifdef _OPENMP
       if (parallel_experiments_ == 1)
         omp_set_nested(1);
-      else
-        omp_set_nested(0);
 #endif
       // Calculate shots per thread
       std::vector<unsigned int> subshots;
