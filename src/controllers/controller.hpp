@@ -617,6 +617,7 @@ void Controller::execute_circuit(Circuit &circ,
       if (parallel_experiments_ == 1)
         omp_set_nested(1);
 #endif
+      parallel_state_update_ = 0;
       // Calculate shots per thread
       std::vector<unsigned int> subshots;
       for (int j = 0; j < parallel_shots_; ++j) {

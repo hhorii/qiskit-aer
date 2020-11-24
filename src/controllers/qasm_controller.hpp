@@ -854,7 +854,6 @@ void QasmController::set_parallelization_circuit(
     case Method::statevector_thrust_gpu:
     case Method::statevector_thrust_cpu:
     case Method::stabilizer:
-    case Method::extended_stabilizer:
     case Method::matrix_product_state: {
       if (circ.shots == 1 ||
           (!noise_model.has_quantum_errors() &&
