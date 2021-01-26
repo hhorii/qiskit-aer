@@ -958,6 +958,7 @@ inline Avx _apply_avx_kernel(const uint64_t* qregs,
 template <typename FloatType>
 typename std::enable_if<std::is_same<FloatType, double>::value, bool>::type
 is_simd_applicable(uint64_t data_size) {
+  if (1) return false;
   if (data_size <= 4)
     return false;
   return true;
@@ -966,6 +967,7 @@ is_simd_applicable(uint64_t data_size) {
 template <typename FloatType>
 typename std::enable_if<std::is_same<FloatType, float>::value, bool>::type
 is_simd_applicable(uint64_t data_size) {
+  if (1) return false;
   if (data_size <= 8)
     return false;
   return true;
