@@ -176,6 +176,13 @@ protected:
   // Run circuit helpers
   //----------------------------------------------------------------
 
+  void get_sampling_circuit(const Circuit &circ,
+                            const Noise::NoiseModel &noise,
+                            RngEngine &rng,
+                            const Method method,
+                            Circuit &sampling_circuit,
+                            std::string &sampling_method) const;
+
   // Execute n-shots of a circuit on the input state
   template <class State_t>
   void run_circuit_helper(const Circuit &circ, const Noise::NoiseModel &noise,
@@ -1385,6 +1392,49 @@ Transpile::Fusion Controller::transpile_fusion(Method method,
 //-------------------------------------------------------------------------
 // Run circuit helpers
 //-------------------------------------------------------------------------
+void Controller::get_sampling_circuit(const Circuit &circ,
+                                      const Noise::NoiseModel &noise,
+                                      RngEngine &rng,
+                                      const Method method,
+                                      Circuit &sampling_circuit,
+                                      std::string &sampling_method) const{
+  Circuit opt_circ;
+  // Ideal circuit
+  if (noise.is_ideal()) {
+    sampling_circuit = circ;
+    sampling_method = "ideal";
+  }
+  // Readout error only
+  else if (noise.has_quantum_errors() == false) {
+    sampling_circuit = noise.sample_noise(circ, rng);
+    sampling_method = "readout";
+  }
+  // Superop noise sampling
+  else if (method == Method::density_matrix || method == Method::superop) {
+    // Sample noise using SuperOp method
+    sampling_circuit = noise.sample_noise(circ, rng, Noise::NoiseModel::Method::superop);
+    sampling_method = "superop";
+  }
+  // Kraus noise sampling
+  else if (noise.opset().contains(Operations::OpType::kraus) ||
+           noise.opset().contains(Operations::OpType::superop)) {
+    sampling_circuit = noise.sample_noise(circ, rng, Noise::NoiseModel::Method::kraus);
+    sampling_method = "kraus";
+  }
+  // General circuit noise sampling
+  else {
+    if(batched_shots_optimization_ && batched_shots_optimization_threshold_ >= max_qubits_ &&
+       sim_device_ == Device::GPU && max_batched_states_ > 1 && max_batched_states_ >= num_gpus_){
+      //for GPU noise sampling is done at runtime
+      sampling_circuit = noise.sample_noise(circ, rng, Noise::NoiseModel::Method::circuit, true);
+      sampling_method = "circuit_runtime";
+    }
+    else{
+      sampling_method = "circuit";
+      sampling_circuit = circ;
+    }
+  }
+}
 
 template <class State_t>
 void Controller::run_circuit_helper(const Circuit &circ,
@@ -1434,45 +1484,12 @@ void Controller::run_circuit_helper(const Circuit &circ,
     if(circ.num_qubits > 0){  //do nothing for query steps
       // Choose execution method based on noise and method
       Circuit opt_circ;
+      std::string sampling_method;
 
-      bool noise_sampling = false;
-      // Ideal circuit
-      if (noise.is_ideal()) {
-        opt_circ = circ;
-        result.metadata.add("ideal", "noise");
-      }
-      // Readout error only
-      else if (noise.has_quantum_errors() == false) {
-        opt_circ = noise.sample_noise(circ, rng);
-        result.metadata.add("readout", "noise");
-      }
-      // Superop noise sampling
-      else if (method == Method::density_matrix || method == Method::superop) {
-        // Sample noise using SuperOp method
-        opt_circ = noise.sample_noise(circ, rng, Noise::NoiseModel::Method::superop);
-        result.metadata.add("superop", "noise");
-      }
-      // Kraus noise sampling
-      else if (noise.opset().contains(Operations::OpType::kraus) ||
-               noise.opset().contains(Operations::OpType::superop)) {
-        opt_circ = noise.sample_noise(circ, rng, Noise::NoiseModel::Method::kraus);
-        result.metadata.add("kraus", "noise");
-      }
-      // General circuit noise sampling
-      else {
-        if(batched_shots_optimization_ && batched_shots_optimization_threshold_ >= max_qubits_ && 
-           sim_device_ == Device::GPU && max_batched_states_ > 1 && max_batched_states_ >= num_gpus_){
-          //for GPU noise sampling is done at runtime
-          opt_circ = noise.sample_noise(circ, rng, Noise::NoiseModel::Method::circuit, true);
-          opt_circ.can_sample = false;
-        }
-        else{
-          noise_sampling = true;
-        }
-        result.metadata.add("circuit", "noise");
-      }
+      get_sampling_circuit(circ, noise, rng, method, opt_circ, sampling_method);
+      result.metadata.add(sampling_method, "noise");
 
-      if(noise_sampling){
+      if(opt_circ.can_sample){
         run_circuit_with_sampled_noise<State_t>(circ, noise, config, shots, method,
                                        cache_blocking, result, rng_seed);
       }
@@ -1518,28 +1535,30 @@ void Controller::run_circuit_helper(const std::vector<Circuit> &circs,
 
 #pragma omp parallel for
   for (int j = 0; j < circs.size(); ++j) {
+    auto& circ_j = circs[j];
+    auto& result_j = result.results[j];
     // Initialize circuit json return
-    result.results[j].legacy_data.set_config(config);
+    result_j.legacy_data.set_config(config);
 
     // Output data container
-    result.results[j].set_config(config);
-    result.results[j].metadata.add(method_names_.at(method), "method");
+    result_j.set_config(config);
+    result_j.metadata.add(method_names_.at(method), "method");
     if (method == Method::statevector || method == Method::density_matrix ||
         method == Method::unitary) {
-      result.results[j].metadata.add(sim_device_name_, "device");
+      result_j.metadata.add(sim_device_name_, "device");
     } else {
-      result.results[j].metadata.add("CPU", "device");
+      result_j.metadata.add("CPU", "device");
     }
     // Add measure sampling to metadata
     // Note: this will set to `true` if sampling is enabled for the circuit
-    result.results[j].metadata.add(false, "measure_sampling");
+    result_j.metadata.add(false, "measure_sampling");
 
     // Circuit qubit metadata
-    result.results[j].metadata.add(circs[j].num_qubits, "num_qubits");
-    result.results[j].metadata.add(circs[j].num_memory, "num_clbits");
-    result.results[j].metadata.add(circs[j].qubits(), "active_input_qubits");
-    result.results[j].metadata.add(circs[j].qubit_map(), "input_qubit_map");
-    result.results[j].metadata.add(circs[j].remapped_qubits, "remapped_qubits");
+    result_j.metadata.add(circ_j.num_qubits, "num_qubits");
+    result_j.metadata.add(circ_j.num_memory, "num_clbits");
+    result_j.metadata.add(circ_j.qubits(), "active_input_qubits");
+    result_j.metadata.add(circ_j.qubit_map(), "input_qubit_map");
+    result_j.metadata.add(circ_j.remapped_qubits, "remapped_qubits");
   }
 
   // Execute in try block so we can catch errors and return the error message
@@ -1567,45 +1586,40 @@ void Controller::run_circuit_helper(const std::vector<Circuit> &circs,
 
 #pragma omp parallel for if(circs.size() > 1)
     for (i_circ=0;i_circ< circs.size(); i_circ++) {
-      rng[i_circ].set_seed(circs[i_circ].seed);
+      auto& circ_i = circs[i_circ];
+      auto& rng_i = rng[i_circ];
+      auto& ops_i = ops[i_circ];
+      auto& result_i = result.results[i_circ];
+      auto& meas_roerror_ops_i = meas_roerror_ops[i_circ];
+      auto& global_phase_i = global_phase[i_circ];
+
+      rng_i.set_seed(circ_i.seed);
 
       Circuit circ;
+      std::string sampling_method;
 
-      // Ideal circuit
-      if (noise.is_ideal()) {
-        circ = circs[i_circ];
-        result.results[i_circ].metadata.add("ideal", "noise");
-      }
-      // Readout error only
-      else if (noise.has_quantum_errors() == false) {
-        circ = noise.sample_noise(circs[i_circ], rng[i_circ]);
-        result.results[i_circ].metadata.add("readout", "noise");
-      }
-      // Superop noise sampling
-      else if (method == Method::density_matrix || method == Method::superop) {
-        // Sample noise using SuperOp method
-        circ = noise.sample_noise(circs[i_circ], rng[i_circ], Noise::NoiseModel::Method::superop);
-        result.results[i_circ].metadata.add("superop", "noise");
-      }
-      else{
+      get_sampling_circuit(circ_i, noise, rng_i, method, circ, sampling_method);
+      result_i.metadata.add(sampling_method, "noise");
+
+      if (!circ.can_sample)
         throw std::runtime_error("Controller : batched experiments with noise sampling is not supported");
-      }
+
       Noise::NoiseModel dummy_noise;
       auto fusion_pass = transpile_fusion(method, circ.opset(), config);
-      fusion_pass.optimize_circuit(circ, dummy_noise, state.opset(), result.results[i_circ]);
+      fusion_pass.optimize_circuit(circ, dummy_noise, state.opset(), result_i);
 
       auto pos =circ.first_measure_pos; // Position of first measurement op
       auto it_pos = std::next(circ.ops.begin(), pos);
       bool final_ops = (pos == circ.ops.size());
 
       // Get measurement opts
-      std::move(it_pos, circ.ops.end(), std::back_inserter(meas_roerror_ops[i_circ]));
+      std::move(it_pos, circ.ops.end(), std::back_inserter(meas_roerror_ops_i));
       circ.ops.resize(pos);
 
-      ops[i_circ] = circ.ops;
+      ops_i = circ.ops;
 
-      global_phase[i_circ] = circs[i_circ].global_phase_angle;
-      states.creg(i_circ).initialize(circs[i_circ].num_memory, circs[i_circ].num_registers);
+      global_phase_i = circ_i.global_phase_angle;
+      states.creg(i_circ).initialize(circ_i.num_memory, circ_i.num_registers);
     }
     states.set_global_phase(global_phase);
 
@@ -1618,9 +1632,13 @@ void Controller::run_circuit_helper(const std::vector<Circuit> &circs,
 
 #pragma omp parallel for if(circs.size() > 1)
     for (i_circ=0;i_circ< circs.size(); i_circ++) {
-      measure_sampler(meas_roerror_ops[i_circ].begin(),meas_roerror_ops[i_circ].end(),shots[i_circ],states,result.results[i_circ],rng[i_circ],i_circ);
+      auto& shots_i = shots[i_circ];
+      auto& rng_i = rng[i_circ];
+      auto& result_i = result.results[i_circ];
+      auto& meas_roerror_ops_i = meas_roerror_ops[i_circ];
+      measure_sampler(meas_roerror_ops_i.begin(), meas_roerror_ops_i.end(), shots_i,states, result_i, rng_i, i_circ);
       // Add measure sampling metadata
-      result.results[i_circ].metadata.add(true, "measure_sampling");
+      result_i.metadata.add(true, "measure_sampling");
     }
   }
   // If an exception occurs during execution, catch it and pass it to the output

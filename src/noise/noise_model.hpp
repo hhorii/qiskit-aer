@@ -272,7 +272,7 @@ Circuit NoiseModel::sample_noise(const Circuit &circ,
     throw std::runtime_error(
       "Kraus or superoperator noise sampling method has not been enabled.");
   }
-  return sample_noise_circuit(circ, rng, method,sample_at_runtime);
+  return sample_noise_circuit(circ, rng, method, sample_at_runtime);
 }
 
 NoiseModel::NoiseOps NoiseModel::sample_noise_at_runtime(const Operations::Op &op,RngEngine &rng) const
@@ -283,7 +283,8 @@ NoiseModel::NoiseOps NoiseModel::sample_noise_at_runtime(const Operations::Op &o
 
 Circuit NoiseModel::sample_noise_circuit(const Circuit &circ,
                                          RngEngine &rng,
-                                         const Method method,bool sample_at_runtime) const 
+                                         const Method method,
+                                         bool sample_at_runtime) const
 {
     bool noise_active = true; // set noise active to on-state
     Circuit noisy_circ;
@@ -336,6 +337,8 @@ Circuit NoiseModel::sample_noise_circuit(const Circuit &circ,
     }
     // Update circuit parameters
     noisy_circ.set_params();
+    if (sample_at_runtime)
+      noisy_circ.can_sample = true;
     return noisy_circ;
 }
 
