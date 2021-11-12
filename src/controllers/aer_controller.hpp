@@ -873,20 +873,12 @@ Result Controller::execute(std::vector<Circuit> &circuits,
   // Execute each circuit in a try block
   try {
     //check if multi-chunk distribution is required
-    std::vector<bool> multi_chunk(circuits.size());
-    bool multi_chunk_req = false;
-    for (size_t j = 0; j < circuits.size(); j++){
-      multi_chunk[j] = false;
-      if(circuits[j].num_qubits > 0){
-        multi_chunk[j] = multiple_chunk_required(circuits[j], noise_model, methods[j]);
-        if(multi_chunk[j])
-          multi_chunk_req = true;
-      }
-    }
-    if(multi_chunk_req)
-      num_process_per_experiment_ = num_processes_;
-    else
-      num_process_per_experiment_ = 1;
+    std::vector<bool> multi_chunk;
+    for (int i = 0; i < circuits.size(); ++i)
+      multi_chunk.push_back(multiple_chunk_required(circuits[i], noise_model, methods[i]));
+    bool multi_chunk_req = std::accumulate(multi_chunk.begin(), multi_chunk.end(), false);
+
+    num_process_per_experiment_ = multi_chunk_req? num_processes_: 1;
 
     // set parallelization for experiments
     try {
@@ -937,16 +929,16 @@ Result Controller::execute(std::vector<Circuit> &circuits,
     if (parallel_experiments_ > 1) {
 #pragma omp parallel for if (parallel_experiments_ > 1) num_threads(parallel_experiments_)
       for (int j = 0; j < NUM_RESULTS; ++j) {
-        run_circuit(circuits[j], noise_model,methods[j],
-                    config, result.results[j],multi_chunk[j]);
+        run_circuit(circuits[j], noise_model, methods[j],
+                    config, result.results[j], multi_chunk[j]);
       }
     }
     else{
       for (int j = 0; j < NUM_RESULTS; ++j) {
         set_parallelization_circuit(circuits[j], noise_model, methods[j]);
 
-        run_circuit(circuits[j], noise_model,methods[j],
-                    config, result.results[j],multi_chunk[j]);
+        run_circuit(circuits[j], noise_model, methods[j],
+                    config, result.results[j], multi_chunk[j]);
       }
     }
 
