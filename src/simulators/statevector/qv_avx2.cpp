@@ -1163,6 +1163,11 @@ Avx apply_diagonal_matrix_avx<double>(double* qv_data_,
                                       const double* vec_,
                                       const size_t omp_threads) {
 
+#if defined(_WIN64) || defined(_WIN32)
+  //temporally disable windows
+  return Avx::NotApplied;
+#else
+
   auto qv_data = _to_complex(qv_data_);
   const auto input_vec = _to_complex(vec_);
 
@@ -1188,7 +1193,7 @@ Avx apply_diagonal_matrix_avx<double>(double* qv_data_,
   const auto batch = (data_size <= (1UL << 5) ? 0 : 4);
 
   auto lambda = [&](const uint64_t i_, const std::complex<double>* in_vec) -> void {
-#if defined(_OPENMP) && !defined(_WIN64) && !defined(_WIN32)
+#if defined(_OPENMP)
       auto tmp_idx = omp_get_thread_num();
 #else
       auto tmp_idx = 0;
@@ -1208,6 +1213,7 @@ Avx apply_diagonal_matrix_avx<double>(double* qv_data_,
   free(double_tmp);
 
   return Avx::Applied;
+#endif
 }
 
 template <>
@@ -1218,6 +1224,10 @@ Avx apply_diagonal_matrix_avx<float>(float* qv_data_,
                                      const float* vec_,
                                      const size_t omp_threads) {
 
+#if defined(_WIN64) || defined(_WIN32)
+  //temporally disable windows
+  return Avx::NotApplied;
+#else
   if (data_size < (1UL << 2))
     return Avx::NotApplied;
 
@@ -1250,7 +1260,7 @@ Avx apply_diagonal_matrix_avx<float>(float* qv_data_,
   const auto batch = (data_size <= (1UL << 6) ? 0 : 4);
 
   auto lambda = [&](const uint64_t i_, const std::complex<float>* in_vec) -> void {
-#if defined(_OPENMP) && !defined(_WIN64) && !defined(_WIN32)
+#if defined(_OPENMP)
       auto tmp_idx = omp_get_thread_num();
 #else
       auto tmp_idx = 0;
@@ -1270,6 +1280,7 @@ Avx apply_diagonal_matrix_avx<float>(float* qv_data_,
   free(float_tmp);
 
   return Avx::Applied;
+#endif
 }
 
 } /* End namespace QV */
