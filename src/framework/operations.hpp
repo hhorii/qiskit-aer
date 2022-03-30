@@ -555,6 +555,8 @@ template<typename inputdata_t>
 Op input_to_op_initialize(const inputdata_t& input);
 template<typename inputdata_t>
 Op input_to_op_pauli(const inputdata_t& input);
+template<typename inputdata_t>
+Op input_to_op_pauli_op_unsafe(const inputdata_t& input);
 
 // Set state
 template<typename inputdata_t>
@@ -711,6 +713,8 @@ Op input_to_op(const inputdata_t& input) {
     return input_to_op_roerror(input);
   if (name == "pauli")
     return input_to_op_pauli(input);
+  if (name == "pauli_op_unsafe")
+    return input_to_op_pauli_op_unsafe(input);
 
   //Control-flow
   if (name == "jump")
@@ -907,6 +911,50 @@ Op input_to_op_pauli(const inputdata_t& input){
   // Conditional
   add_conditional(Allowed::No, op, input);
 
+  // Validation
+  check_empty_qubits(op);
+  check_duplicate_qubits(op);
+
+  return op;
+}
+
+template<typename inputdata_t>
+Op input_to_op_pauli_op_unsafe(const inputdata_t& input){
+  Op op;
+  op.type = OpType::gate;
+  op.name = "pauli_op_unsafe";
+  Parser<inputdata_t>::get_value(op.qubits, "qubits", input);
+
+  // Parse Pauli operator components
+  const auto threshold = 1e-12; // drop small components
+  // Get components
+  if (Parser<inputdata_t>::check_key("params", input) && Parser<inputdata_t>::is_array("params", input)) {
+    for (const auto &comp_ : Parser<inputdata_t>::get_value("params", input)) {
+      const auto& comp = Parser<inputdata_t>::get_as_list(comp_);
+      // Get complex coefficient
+      std::vector<double> coeffs = Parser<inputdata_t>::template get_list_elem<std::vector<double>>(comp, 1);
+      if (std::abs(coeffs[0]) > threshold || std::abs(coeffs[1]) > threshold) {
+        std::string pauli = Parser<inputdata_t>::template get_list_elem<std::string>(comp, 0);
+        if (pauli.size() != op.qubits.size()) {
+          throw std::invalid_argument(std::string("Invalid expectation value save instruction ") +
+                                      "(Pauli label does not match qubit number.).");
+        }
+        op.string_params.emplace_back(pauli);
+        op.params.emplace_back(coeffs[0]);
+      }
+    }
+  } else {
+    throw std::invalid_argument("Invalid save expectation value \"params\".");
+  }
+
+  // Check edge case of all coefficients being empty
+  // In this case the operator had all coefficients zero, or sufficiently close
+  // to zero that they were all truncated.
+  if (op.expval_params.empty()) {
+    std::string pauli(op.qubits.size(), 'I');
+    op.expval_params.emplace_back(pauli, 0., 0.);
+  }
+  
   // Validation
   check_empty_qubits(op);
   check_duplicate_qubits(op);

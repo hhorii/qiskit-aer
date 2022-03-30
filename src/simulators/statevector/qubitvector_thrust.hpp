@@ -282,6 +282,10 @@ public:
   void apply_pauli(const reg_t &qubits, const std::string &pauli,
                    const complex_t &coeff = 1);
 
+  void apply_pauli_op_unsafe(const reg_t &qubits,
+                             const std::vector<std::string>& paulis,
+                             const std::vector<std::complex<double>>& coeffs);
+
   //-----------------------------------------------------------------------
   // Z-measurement outcome probabilities
   //-----------------------------------------------------------------------
@@ -2881,6 +2885,14 @@ void QubitVectorThrust<data_t>::apply_batched_pauli_ops(const std::vector<std::v
   thrust::complex<data_t> coeff(1.0,0.0);
   chunk_.StoreUintParams(params);
   apply_function(batched_pauli_func<data_t>(num_qubits_,coeff) );
+}
+
+template <typename data_t>
+void QubitVectorThrust<data_t>::apply_pauli_op_unsafe(const reg_t &qubits,
+                                                      const std::vector<std::string>& paulis,
+                                                      const std::vector<std::complex<double>>& coeffs)
+{
+  // not implemented yet
 }
 
 template <typename data_t>

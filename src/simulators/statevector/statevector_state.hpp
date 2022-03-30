@@ -58,7 +58,8 @@ const Operations::OpSet StateOpSet(
      "r",      "rx",      "ry",  "rz",   "rxx",  "ryy",  "rzz",  "rzx",
      "ccx",    "cswap",   "mcx", "mcy",  "mcz",  "mcu1", "mcu2", "mcu3",
      "mcswap", "mcphase", "mcr", "mcrx", "mcry", "mcry", "sx",   "sxdg",
-     "csx", "mcsx", "csxdg", "mcsxdg",  "delay", "pauli", "mcx_gray", "cu", "mcu", "mcp"},
+     "csx", "mcsx", "csxdg", "mcsxdg",  "delay", "pauli", "mcx_gray", "cu", "mcu", "mcp",
+     "pauli_op_unsafe"},
     // Snapshots
     {"statevector", "memory", "register", "probabilities",
      "probabilities_with_variance", "expectation_value_pauli", "density_matrix",
@@ -72,7 +73,7 @@ enum class Gates {
   id, h, s, sdg, t, tdg,
   rxx, ryy, rzz, rzx,
   mcx, mcy, mcz, mcr, mcrx, mcry,
-  mcrz, mcp, mcu2, mcu3, mcu, mcswap, mcsx, mcsxdg, pauli
+  mcrz, mcp, mcu2, mcu3, mcu, mcswap, mcsx, mcsxdg, pauli, pauli_op_unsafe
 };
 
 // Allowed snapshots enum class
@@ -421,6 +422,7 @@ const stringmap_t<Gates> State<statevec_t>::gateset_({
     {"mcsx", Gates::mcsx},    // Multi-controlled-Sqrt(X) gate
     {"mcsxdg", Gates::mcsxdg}, // Multi-controlled-Sqrt(X)dg gate
     {"pauli", Gates::pauli},   // Multi-qubit Pauli gate
+    {"pauli_op_unsafe", Gates::pauli_op_unsafe},
     {"mcx_gray", Gates::mcx}
 });
 
@@ -1623,6 +1625,9 @@ void State<statevec_t>::apply_gate(const int_t iChunk, const Operations::Op &op)
       break;
     case Gates::pauli:
       BaseState::qregs_[iChunk].apply_pauli(op.qubits, op.string_params[0]);
+      break;
+    case Gates::pauli_op_unsafe:
+      BaseState::qregs_[iChunk].apply_pauli_op_unsafe(op.qubits, op.string_params, op.params);
       break;
     default:
       // We shouldn't reach here unless there is a bug in gateset

@@ -272,6 +272,9 @@ public:
   void apply_chunk_swap(const reg_t &qubits, uint_t remote_chunk_index);
   void apply_pauli(const reg_t &qubits, const std::string &pauli,
                    const complex_t &coeff = 1);
+  void apply_pauli_op_unsafe(const reg_t &qubits,
+                             const std::vector<std::string>& paulis,
+                             const std::vector<std::complex<double>>& coeffs);
 
   //-----------------------------------------------------------------------
   // Z-measurement outcome probabilities
@@ -2244,6 +2247,67 @@ void QubitVector<data_t>::apply_pauli(const reg_t &qubits, const std::string &pa
   apply_lambda(lambda, (size_t) 0, (data_size_ >> 1));
 }
 
+template <typename data_t>
+void QubitVector<data_t>::apply_pauli_op_unsafe(const reg_t &qubits,
+                                                const std::vector<std::string>& paulis,
+                                                const std::vector<std::complex<double>>& coeffs) {
+  auto checkpoint = data_;
+
+  data_ = nullptr;
+  allocate_mem(data_size_);
+  zero();
+
+  for (auto i = 0; i < paulis.size(); ++i) {
+    const auto &pauli = paulis[i];
+    const auto &coeff = coeffs[i].real();
+    
+    uint_t x_mask, z_mask, num_y, x_max;
+    std::tie(x_mask, z_mask, num_y, x_max) = pauli_masks_and_phase(qubits, pauli);
+
+    auto phase = std::complex<data_t>(coeff);
+    add_y_phase(num_y, phase);
+
+    // Special case for only I Paulis
+    if (x_mask + z_mask == 0) {
+      auto lambda = [&](const int_t i)->void {
+        data_[i] += checkpoint[i] * phase;
+      };
+      apply_lambda(lambda);
+      continue;
+    }
+    // specialize x_max == 0
+    if (!x_mask) {
+      auto lambda = [&](const int_t i)->void {
+          if (z_mask && (AER::Utils::popcount(i & z_mask) & 1)) {
+              data_[i] -= checkpoint[i] * phase;
+          } else {
+              data_[i] += checkpoint[i] * phase;
+          }
+      };
+      apply_lambda(lambda);
+      continue;
+    }
+
+    const uint_t mask_u = ~MASKS[x_max + 1];
+    const uint_t mask_l = MASKS[x_max];
+    auto lambda = [&](const int_t i)->void {
+      int_t idxs[2];
+      idxs[0] = ((i << 1) & mask_u) | (i & mask_l);
+      idxs[1] = idxs[0] ^ x_mask;
+      std::swap(checkpoint[idxs[0]], checkpoint[idxs[1]]);
+      for (int_t j = 0; j < 2; ++j) {
+        if (z_mask && (AER::Utils::popcount(idxs[j] & z_mask) & 1)) {
+          data_[idxs[j]] -= phase * checkpoint[idxs[j]];
+        } else {
+          data_[idxs[j]] += phase * checkpoint[idxs[j]];
+        }
+      }
+      std::swap(checkpoint[idxs[0]], checkpoint[idxs[1]]);
+    };
+    apply_lambda(lambda, (size_t) 0, (data_size_ >> 1));
+  }
+  free(checkpoint);
+}
 
 //------------------------------------------------------------------------------
 } // end namespace QV
