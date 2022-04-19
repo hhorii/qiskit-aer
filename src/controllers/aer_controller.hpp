@@ -949,6 +949,7 @@ Result Controller::execute(std::vector<Circuit> &circuits,
       num_process_per_experiment_ = 1;
 
     // set parallelization for experiments
+    matrix<double>::enable_blas(false);
     try {
       // catch exception raised by required_memory_mb because of invalid
       // simulation method
@@ -1480,6 +1481,10 @@ void Controller::run_circuit_without_sampled_noise(Circuit &circ,
       state.set_max_matrix_qubits(max_bits);
       RngEngine rng;
       rng.set_seed(circ.seed);
+
+    if (parallel_experiments_ <= 1)
+      matrix<double>::enable_blas(true);
+
       run_with_sampling(circ, state, result, rng, block_bits, circ.shots);
     } else {
       // Vector to store parallel thread output data

@@ -55,6 +55,8 @@ T* calloc_array(size_t size) {
   return reinterpret_cast<T*>(calloc(size, sizeof(T)));
 }
 
+// flag to use blas library (default: true)
+static bool use_blas = true;
 
 template <class T> // define a class template
 class matrix {
@@ -120,6 +122,14 @@ class matrix {
   friend std::vector<std::complex<double>>
   operator*(const matrix<std::complex<double>> &A,
             const std::vector<std::complex<double>> &v);
+
+  friend std::vector<std::complex<double>>
+  operator*(const matrix<std::complex<double>> &A,
+            const std::vector<std::complex<double>> &v);
+
+  template <class S>
+  friend matrix<S> matrix_mul(const matrix<S> &A,
+                              const matrix<S> &B);
 
 public:
   //-----------------------------------------------------------------------
@@ -225,6 +235,8 @@ public:
   matrix<T> &operator+=(const matrix<T> &A);
   matrix<T> &operator-=(const matrix<T> &A);
 
+  // flag to use blas library (default: true)
+  static void enable_blas(bool enable) { use_blas = enable; };
   //-----------------------------------------------------------------------
   // Legacy methods
   //-----------------------------------------------------------------------
@@ -673,6 +685,8 @@ matrix<S1> operator*(const S2 &beta, const matrix<S1> &A) {
 // Operator overloading with BLAS functions
 inline matrix<double> operator*(const matrix<double> &A,
                                 const matrix<double> &B) {
+  if (!use_blas)
+    return matrix_mul(A, B);
   // overloads A*B for real matricies and uses the blas dgemm routine
   // cblas_dgemm(CblasXMajor,op,op,N,M,K,alpha,A,LDA,B,LDB,beta,C,LDC)
   // C-> alpha*op(A)*op(B) +beta C
@@ -685,6 +699,8 @@ inline matrix<double> operator*(const matrix<double> &A,
   return C;
 }
 inline matrix<float> operator*(const matrix<float> &A, const matrix<float> &B) {
+  if (!use_blas)
+    return matrix_mul(A, B);
   // overloads A*B for real matricies and uses the blas sgemm routine
   // cblas_sgemm(CblasXMajor,op,op,N,M,K,alpha,A,LDA,B,LDB,beta,C,LDC)
   // C-> alpha*op(A)*op(B) +beta C
@@ -699,6 +715,8 @@ inline matrix<float> operator*(const matrix<float> &A, const matrix<float> &B) {
 inline matrix<std::complex<float>>
 operator*(const matrix<std::complex<float>> &A,
           const matrix<std::complex<float>> &B) {
+  if (!use_blas)
+    return matrix_mul(A, B);
   // overloads A*B for complex matricies and uses the blas zgemm routine
   // cblas_zgemm(CblasXMajor,op,op,N,M,K,alpha,A,LDA,B,LDB,beta,C,LDC)
   // C-> alpha*op(A)*op(B) +beta C
@@ -713,6 +731,8 @@ operator*(const matrix<std::complex<float>> &A,
 inline matrix<std::complex<double>>
 operator*(const matrix<std::complex<double>> &A,
           const matrix<std::complex<double>> &B) {
+  if (!use_blas)
+    return matrix_mul(A, B);
   // overloads A*B for complex matricies and uses the blas zgemm routine
   // cblas_zgemm(CblasXMajor,op,op,N,M,K,alpha,A,LDA,B,LDB,beta,C,LDC)
   // C-> alpha*op(A)*op(B) +beta C
@@ -826,6 +846,22 @@ operator*(const matrix<std::complex<double>> &A,
   zgemv_(&AerBlas::Trans[0], &A.rows_, &A.cols_, &alpha, A.data_, &A.LD_, x.data(), &incx,
          &beta, y.data(), &incy);
   return y;
+}
+
+template <class S>
+inline matrix<S> matrix_mul(const matrix<S> &A,
+                            const matrix<S> &B) {
+  size_t rows1 = A.rows_, cols1 = A.cols_;
+  size_t cols2 = B.cols_;
+  matrix<S> temp(rows1, cols2);
+  for (size_t i = 0; i < rows1; i++) {
+    for (size_t j = 0; j < cols2; j++) {
+      for (size_t k = 0; k < cols1; k++) {
+        temp(i, j) += A(i, k) * B(k, j);
+      }
+    }
+  }
+  return temp;
 }
 
 //------------------------------------------------------------------------------
