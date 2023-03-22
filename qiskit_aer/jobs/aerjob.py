@@ -34,6 +34,7 @@ class AerJob(Job):
         fn,
         qobj=None,
         circuits=None,
+        aer_circuits=None,
         noise_model=None,
         config=None,
         executor=None,
@@ -48,6 +49,8 @@ class AerJob(Job):
                 with the signature `(qobj: QasmQobj, job_id: str) -> Result`.
             qobj(QasmQobj): qobj to execute
             circuits(list of QuantumCircuit): circuits to execute.
+                If `qobj` is set, this argument is ignored.
+            aer_circuits(list of AerCircuit): native circuits to execute.
                 If `qobj` is set, this argument is ignored.
             noise_model(NoiseModel): noise_model to execute.
                 If `qobj` is set, this argument is ignored.
@@ -64,11 +67,13 @@ class AerJob(Job):
         if qobj:
             self._qobj = qobj
             self._circuits = None
+            self._aer_circuits = None
             self._noise_model = None
             self._config = None
         elif circuits:
             self._qobj = None
             self._circuits = circuits
+            self._aer_circuits = aer_circuits
             self._noise_model = noise_model
             self._config = config
         else:
@@ -90,7 +95,7 @@ class AerJob(Job):
             self._future = self._executor.submit(self._fn, self._qobj, self._job_id)
         else:
             self._future = self._executor.submit(
-                self._fn, self._circuits, self._noise_model, self._config, self._job_id
+                self._fn, self._circuits, self._aer_circuits, self._noise_model, self._config, self._job_id
             )
 
     @requires_submit

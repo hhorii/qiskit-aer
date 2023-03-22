@@ -228,6 +228,10 @@ class AerBackend(Backend, ABC):
     def _run_circuits(self, circuits, parameter_binds, **run_options):
         """Run circuits by generating native circuits."""
         circuits, noise_model = self._compile(circuits, **run_options)
+        return self._run_aer_circuits(circuits, None, noise_model, parameter_binds, **run_options)
+
+    def _run_aer_circuits(self, circuits, aer_circuits, noise_model, parameter_binds, **run_options):
+        """Run native circuits."""
         if parameter_binds:
             run_options["parameterizations"] = self._convert_binds(circuits, parameter_binds)
         config = generate_aer_config(circuits, self.options, **run_options)
@@ -239,6 +243,7 @@ class AerBackend(Backend, ABC):
             job_id,
             self._execute_circuits_job,
             circuits=circuits,
+            aer_circuits=aer_circuits,
             noise_model=noise_model,
             config=config,
         )
@@ -418,7 +423,7 @@ class AerBackend(Backend, ABC):
             return self._format_results(output)
         return output
 
-    def _execute_circuits_job(self, circuits, noise_model, config, job_id="", format_result=True):
+    def _execute_circuits_job(self, circuits, aer_circuits, noise_model, config, job_id="", format_result=True):
         """Run a job"""
         # Start timer
         start = time.time()
@@ -435,7 +440,8 @@ class AerBackend(Backend, ABC):
                 metadata_list.append(None)
 
         # Run simulation
-        aer_circuits = assemble_circuits(circuits)
+        if aer_circuits is None:
+            aer_circuits = assemble_circuits(circuits)
         output = self._execute_circuits(aer_circuits, noise_model, config)
 
         # Validate output
